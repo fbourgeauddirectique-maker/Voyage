@@ -905,12 +905,16 @@ const poiLayer=L.layerGroup().addTo(map),savedLayer=L.layerGroup().addTo(map),ro
 const pin=(color,html,o={})=>{const s=o.saved?40:(o.size||34);return L.divIcon({className:'',html:`<div class="pin${o.saved?' saved':''}" style="--c:${color}">${html}</div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]})};
 
 /* ---------- Overpass (sans clé) ---------- */
-const EPS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const EPS=['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
 async function overpass(q){
+  let why='';
   for(const ep of EPS){
-    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),32000);
-    try{const r=await fetch(ep,{method:'POST',body:'data='+encodeURIComponent(q),signal:ac.signal});clearTimeout(to);if(r.ok)return await r.json()}catch(e){clearTimeout(to)}}
-  throw new Error('overpass')}
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),30000);
+    try{const r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q),signal:ac.signal});clearTimeout(to);
+      if(r.ok){const j=await r.json();return j}
+      why=r.status===429||r.status===504||r.status===503?'serveur de lieux saturé, réessayez dans un instant':'serveur de lieux : erreur '+r.status}
+    catch(e){clearTimeout(to);why=e.name==='AbortError'?'délai dépassé':'requête bloquée (réseau, ou restriction de la page où l’app est ouverte)'}}
+  throw new Error(why||'échec')}
 function ingest(els,mode){
   const add=[];
   for(const e of els){
@@ -951,7 +955,7 @@ async function searchHere(){
   if(map.getZoom()<13)return toast('Zoomez un peu pour chercher dans cette zone');
   busy('Recherche des lieux…');
   try{const n=await fetchPOIs(map.getBounds(),S.interests);toast(n?`${n} lieux trouvés`:'Aucun lieu trouvé ici')}
-  catch(e){toast('Pas de connexion : seuls les lieux déjà enregistrés sont affichés',3600)}
+  catch(e){toast(navigator.onLine?'Recherche impossible : '+e.message:'Hors ligne : seuls les lieux déjà enregistrés sont affichés',4500)}
   busy();refreshMarkers()}
 async function geocode(q){const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=fr&q='+encodeURIComponent(q));return r.json()}
 async function doSearch(){
@@ -1004,7 +1008,7 @@ async function refreshTr(id,silent){
   const p=find(id);if(!p)return;if(!navigator.onLine)return toast('Hors ligne : transports déjà en mémoire uniquement');
   if(!silent)busy('Recherche des transports…');
   try{await fetchTransports(`(around:900,${p.lat},${p.lon})`);showTr=true;$('#fTr').classList.add('on');refreshMarkers();if(selId===id){const e=$('#trl');if(e)e.innerHTML=trListHtml(p)}}
-  catch(e){if(!silent)toast('Service indisponible pour le moment')}
+  catch(e){if(!silent)toast('Transports : '+e.message,4000)}
   busy()}
 function focusPlace(id,open=true){const p=find(id);if(!p)return;setTab('carte');map.setView([p.lat,p.lon],Math.max(map.getZoom(),16));if(open)openPlace(id)}
 
@@ -1193,7 +1197,7 @@ $('#fLoc').onclick=()=>locate(true);
 $('#fDl').onclick=prepareArea;
 $('#fTr').onclick=async()=>{showTr=!showTr;$('#fTr').classList.toggle('on',showTr);refreshMarkers();
   if(showTr){const c=map.getCenter();const ref=pos||{lat:c.lat,lon:c.lng};
-    if(!nearbyTr(ref.lat,ref.lon,700).length){if(!navigator.onLine)return toast('Aucun transport en mémoire ici');busy('Recherche des transports…');try{await fetchTransports(`(around:800,${ref.lat},${ref.lon})`);refreshMarkers()}catch(e){toast('Service indisponible pour le moment')}busy()}}};
+    if(!nearbyTr(ref.lat,ref.lon,700).length){if(!navigator.onLine)return toast('Aucun transport en mémoire ici');busy('Recherche des transports…');try{await fetchTransports(`(around:800,${ref.lat},${ref.lon})`);refreshMarkers()}catch(e){toast('Transports : '+e.message,4000)}busy()}}};
 $$('nav button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 document.addEventListener('click',e=>{if(!e.target.closest('#results,#sbox'))$('#results').hidden=true});
 map.on('click',()=>{if(tab==='carte')closeSheet()});
