@@ -724,6 +724,7 @@ body.sheet-open #searchHere,body.sheet-open #fabs{display:none!important}
 .btn.sm{height:34px;padding:0 12px;font-size:13px}
 .trl{margin:8px 0 0;display:grid;gap:6px}
 .trl button{display:flex;align-items:center;gap:10px;border:0;background:var(--card);border-radius:12px;padding:9px 12px;text-align:left;font-size:14px}
+.trl button{flex-wrap:wrap}.lns{flex-basis:100%;padding:2px 0 0 30px}.ln{display:inline-block;min-width:28px;padding:2px 8px;margin:3px 4px 0 0;border-radius:9px;background:var(--c);color:#fff;font-weight:900;font-size:12.5px;text-align:center}
 .trl b{flex:1;font-weight:700}
 .trl i{font-style:normal;color:var(--mut);font-size:13px}
 textarea,input[type=text],input[type=number],select{width:100%;border:2px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px;font-size:15px}
@@ -996,7 +997,7 @@ async function doSearch(){
 
 /* ---------- lieux du voyage ---------- */
 const find=id=>trip().places.find(p=>p.id===id)||POI.get(id)||TEMP.get(id);
-function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{}});save()}
+function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines});save()}
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
@@ -1005,10 +1006,30 @@ function nearbyTr(lat,lon,r=900){
   const seen=new Map();
   POI.forEach(p=>{if(p.kind!=='tr')return;const d=hav(lat,lon,p.lat,p.lon);if(d>r)return;const k=p.cat+'|'+p.name;const o=seen.get(k);if(!o||d<o.d)seen.set(k,{p,d})});
   return [...seen.values()].sort((a,b)=>a.d-b.d).slice(0,7)}
+const OSMAPI='https://api.openstreetmap.org/api/0.6/';
+const RT={bus:'bus',trolleybus:'bus',tram:'tram',subway:'metro',light_rail:'metro',monorail:'metro',train:'train',ferry:'ferry'};
+const chipsHtml=p=>p.lines?p.lines.map(l=>`<span class="ln" style="--c:${TRMAP[l.t].color}" title="${esc(l.n?'vers '+l.n:'')}">${esc(l.r.length>7?l.r.slice(0,7):l.r)}</span>`).join(''):'';
+async function osmRels(id){const t={n:'node',w:'way',r:'relation'}[id[0]];if(!t)return[];const r=await fetch(`${OSMAPI}${t}/${id.slice(1)}/relations.json`);if(!r.ok)throw new Error('osm');return (await r.json()).elements||[]}
+async function getLines(p){
+  if(p.lines)return p.lines;if(!/^[nwr]\d+$/.test(p.id))return null;
+  const seen=new Map(),add=els=>els.forEach(e=>{const t=e.tags||{},k=RT[t.route];if(!k)return;const ref=t.ref||'';if(!ref)return;const key=k+'|'+ref;if(!seen.has(key))seen.set(key,{r:ref,t:k,n:t.to||''})});
+  const els=await osmRels(p.id);add(els);
+  if(!seen.size){const sa=els.find(e=>e.tags&&e.tags.public_transport==='stop_area');
+    if(sa){const rr=await fetch(`${OSMAPI}relation/${sa.id}.json`);if(rr.ok){const mem=(((await rr.json()).elements||[])[0]||{}).members||[];
+      for(const m of mem.filter(m=>m.type==='node').slice(0,8)){try{add(await osmRels('n'+m.ref))}catch(e){}}}}}
+  p.lines=[...seen.values()].sort((a,b)=>a.r.localeCompare(b.r,'fr',{numeric:true}));
+  const q=POI.get(p.id);if(q&&q!==p){q.lines=p.lines}if(q)idbPut([q]);
+  const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p){sv.lines=p.lines}if(sv)save();
+  return p.lines}
+function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(m)m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><br>'+chipsHtml(p):'<small style="color:var(--mut)">Aucune ligne renseignée pour cet arrêt</small>'):(navigator.onLine?'<small style="color:var(--mut)">Recherche des lignes…</small>':'')}
+async function loadSheetLines(p){
+  paintLines(p);if(!navigator.onLine)return;
+  const rows=p.kind==='tr'?[p]:nearbyTr(p.lat,p.lon).map(x=>x.p),todo=rows.filter(q=>!q.lines);
+  for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(()=>{})));if(selId!==p.id)return;paintLines(p)}}
 function trListHtml(p){
   const l=nearbyTr(p.lat,p.lon);
   if(!l.length)return '<div class="empty">Aucun transport en mémoire autour de ce lieu.</div>';
-  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i></button>`}).join('')}
+  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i>${x.p.lines&&x.p.lines.length?'<div class="lns">'+chipsHtml(x.p)+'</div>':''}</button>`}).join('')}
 function openPlace(id){
   const p=find(id);if(!p)return;selId=id;const saved=trip().places.find(x=>x.id===id),c=catOf(p.cat),t=p.tags||{};
   const web=t.website||t['contact:website'],tel=t.phone||t['contact:phone'];
@@ -1022,17 +1043,18 @@ function openPlace(id){
   const t0=trip();
   $('#sheet').innerHTML=`<div class="grab"></div><div class="sh-title"><div class="sh-ico" style="--c:${c.color}">${c.icon}</div><div><h3>${esc(p.name)}</h3><small>${esc(p.sub&&p.sub!==p.name?p.sub+' · ':'')}${c.label}</small></div><button class="sh-x" data-act="closeSheet" aria-label="Fermer">✕</button></div>
   ${meta.length?`<p class="meta">${meta.join('<br>')}</p>`:''}
+  ${p.kind==='tr'?'<div class="lns" id="myLines" style="padding-left:0;margin-top:8px"></div>':''}
   <div class="btns">${saved?`<button class="btn bad" data-act="unsave" data-id="${esc(id)}">Retirer du voyage</button>`:`<button class="btn pri" data-act="save" data-id="${esc(id)}">⭐ Ajouter au voyage</button>`}
   <a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${goUrl(p)}" target="_blank" rel="noopener">Y aller à pied</a></div>
   ${saved?`<div class="line"><select data-chg="assignDay" data-id="${esc(id)}" aria-label="Jour"><option value="-1">Non planifié</option>${t0.days.map((d,i)=>`<option value="${i}"${dayOf(id)===i?' selected':''}>Jour ${i+1}</option>`).join('')}</select></div><textarea data-inp="note" data-id="${esc(id)}" placeholder="Une note : horaires, réservation, idée…">${esc(saved.note)}</textarea>`:''}
   ${p.kind==='tr'?'':`<h4 style="margin:16px 0 4px">Transports à proximité</h4><div class="trl" id="trl">${trListHtml(p)}</div><div class="btns"><button class="btn sm" data-act="refreshTr" data-id="${esc(id)}">Actualiser (en ligne)</button></div>`}`;
-  $('#sheet').classList.add('on');document.body.classList.add('sheet-open');
+  $('#sheet').classList.add('on');document.body.classList.add('sheet-open');loadSheetLines(p);
   if(p.kind!=='tr'&&!nearbyTr(p.lat,p.lon).length&&navigator.onLine)refreshTr(id,true)}
 function closeSheet(){$('#sheet').classList.remove('on');document.body.classList.remove('sheet-open');selId=null;if(tempMarker){map.removeLayer(tempMarker);tempMarker=null}}
 async function refreshTr(id,silent){
   const p=find(id);if(!p)return;if(!navigator.onLine)return toast('Hors ligne : transports déjà en mémoire uniquement');
   if(!silent)busy('Recherche des transports…');
-  try{await fetchTransports(`(around:900,${p.lat},${p.lon})`,{lat:p.lat,lon:p.lon});showTr=true;$('#fTr').classList.add('on');refreshMarkers();if(selId===id){const e=$('#trl');if(e)e.innerHTML=trListHtml(p)}}
+  try{await fetchTransports(`(around:900,${p.lat},${p.lon})`,{lat:p.lat,lon:p.lon});showTr=true;$('#fTr').classList.add('on');refreshMarkers();if(selId===id){const e=$('#trl');if(e)e.innerHTML=trListHtml(p);loadSheetLines(p)}}
   catch(e){if(!silent)toast('Transports : '+e.message,4000)}
   busy()}
 function focusPlace(id,open=true){const p=find(id);if(!p)return;setTab('carte');map.setView([p.lat,p.lon],Math.max(map.getZoom(),16));if(open)openPlace(id)}
