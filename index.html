@@ -831,7 +831,7 @@ const CATS=[
  {id:'histoire',label:'Histoire & monuments',icon:'🏰',color:'#FF7A1A',sel:[re('historic','monument|castle|ruins|memorial|archaeological_site|fort|city_gate|palace')+'["name"]'],test:t=>/^(monument|castle|ruins|memorial|archaeological_site|fort|city_gate|palace)$/.test(t.historic)},
  {id:'vue',label:'Points de vue',icon:'🌄',color:'#FF3D8B',sel:['["tourism"="viewpoint"]'],test:t=>t.tourism==='viewpoint'},
  {id:'incontournable',label:'Sites incontournables',icon:'⭐',color:'#E8A700',sel:['["tourism"="attraction"]["name"]'],test:t=>t.tourism==='attraction'},
- {id:'sacre',label:'Temples & lieux de culte',icon:'⛩️',color:'#E8344E',sel:['["amenity"="place_of_worship"][~"^(wikidata|wikipedia)$"~"."]'],test:t=>t.amenity==='place_of_worship'},
+ {id:'sacre',label:'Temples & lieux de culte',icon:'⛩️',color:'#E8344E',sel:['["amenity"="place_of_worship"]["wikidata"]'],test:t=>t.amenity==='place_of_worship'},
  {id:'nature',label:'Parcs & jardins',icon:'🌳',color:'#18B84F',sel:[re('leisure','park|garden|nature_reserve')+'["name"]'],test:t=>/^(park|garden|nature_reserve)$/.test(t.leisure)},
  {id:'plage',label:'Plages',icon:'🏖️',color:'#00A8E8',sel:['["natural"="beach"]'],test:t=>t.natural==='beach'},
  {id:'famille',label:'Zoos & parcs d’attractions',icon:'🎡',color:'#FF5C8A',sel:[re('tourism','zoo|theme_park|aquarium')],test:t=>/^(zoo|theme_park|aquarium)$/.test(t.tourism)},
@@ -906,15 +906,13 @@ const pin=(color,html,o={})=>{const s=o.saved?40:(o.size||34);return L.divIcon({
 
 /* ---------- Overpass (sans clé) ---------- */
 const EPS=['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
-async function overpass(q){
-  let why='';
-  for(const ep of EPS){
-    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),30000);
-    try{const r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q),signal:ac.signal});clearTimeout(to);
-      if(r.ok){const j=await r.json();return j}
-      why=r.status===429||r.status===504||r.status===503?'serveur de lieux saturé, réessayez dans un instant':'serveur de lieux : erreur '+r.status}
-    catch(e){clearTimeout(to);why=e.name==='AbortError'?'délai dépassé':'requête bloquée (réseau, ou restriction de la page où l’app est ouverte)'}}
-  throw new Error(why||'échec')}
+async function overpass(q,ms=25000){
+  const acs=EPS.map(()=>new AbortController()),tm=setTimeout(()=>acs.forEach(a=>a.abort()),ms);
+  const tries=EPS.map((ep,i)=>fetch(ep,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q),signal:acs[i].signal}).then(r=>{if(!r.ok)throw new Error(r.status===429||r.status>=502?'serveur saturé':'erreur '+r.status);return r.json()}));
+  try{const j=await Promise.any(tries);acs.forEach(a=>a.abort());return j}
+  catch(e){const er=e.errors||[e],sat=er.find(x=>/saturé|erreur/.test(x.message||''));
+    throw new Error(sat?sat.message+', réessayez dans un instant':er.some(x=>x.name==='AbortError')?'délai dépassé':'requête bloquée (réseau ou restriction de la page)')}
+  finally{clearTimeout(tm)}}
 function ingest(els,mode){
   const add=[];
   for(const e of els){
@@ -928,11 +926,15 @@ function ingest(els,mode){
     const p={id,lat,lon,name,sub,cat,kind,tags:keep};POI.set(id,p);add.push(p)}
   idbPut(add);return add.length}
 const bbox=b=>`(${b.getSouth().toFixed(5)},${b.getWest().toFixed(5)},${b.getNorth().toFixed(5)},${b.getEast().toFixed(5)})`;
+function clampB(b){const c=b.getCenter(),h=Math.min((b.getNorth()-b.getSouth())/2,0.02),w=Math.min((b.getEast()-b.getWest())/2,0.03);return L.latLngBounds([c.lat-h,c.lng-w],[c.lat+h,c.lng+w])}
 async function fetchPOIs(b,ids){
-  const body=ids.map(id=>CATMAP[id].sel.map(s=>`nwr${s}${bbox(b)};`).join('')).join('');
-  const d=await overpass(`[out:json][timeout:25];(${body});out center tags 600;`);return ingest(d.elements,'poi')}
+  b=clampB(b);let n=0,err=null;const pending=[...ids];
+  const run=async()=>{while(pending.length){const id=pending.shift();
+    try{const d=await overpass(`[out:json][timeout:20];(${CATMAP[id].sel.map(x=>`nwr${x}${bbox(b)};`).join('')});out tags center qt 250;`);n+=ingest(d.elements,'poi');refreshMarkers()}catch(e){err=err||e}}};
+  await Promise.all([run(),run()]);
+  if(!n&&err)throw err;return n}
 async function fetchTransports(area){
-  const d=await overpass(`[out:json][timeout:25];(${TRSEL.map(s=>s+area+';').join('')});out center tags 800;`);return ingest(d.elements,'tr')}
+  const d=await overpass(`[out:json][timeout:20];(${TRSEL.map(s=>s+area+';').join('')});out tags center qt 500;`);return ingest(d.elements,'tr')}
 
 /* ---------- marqueurs ---------- */
 let rt;
@@ -952,7 +954,7 @@ function renderChips(){
 /* ---------- recherche de lieux ---------- */
 async function searchHere(){
   if(!S.interests.length)return toast('Choisissez au moins un centre d’intérêt');
-  if(map.getZoom()<13)return toast('Zoomez un peu pour chercher dans cette zone');
+  if(map.getZoom()<12)return toast('Zoomez un peu pour chercher dans cette zone');
   busy('Recherche des lieux…');
   try{const n=await fetchPOIs(map.getBounds(),S.interests);toast(n?`${n} lieux trouvés`:'Aucun lieu trouvé ici')}
   catch(e){toast(navigator.onLine?'Recherche impossible : '+e.message:'Hors ligne : seuls les lieux déjà enregistrés sont affichés',4500)}
@@ -1038,7 +1040,7 @@ async function prepareArea(){
     done++;busy(`Carte hors-ligne… ${done}/${list.length}`)}};
   await Promise.all([worker(),worker(),worker()]);
   busy('Lieux et transports…');
-  try{if(S.interests.length&&z>=13)await fetchPOIs(b,S.interests);if(z>=14){showTr=true;$('#fTr').classList.add('on');await fetchTransports(bbox(b))}}catch(e){fail++}
+  try{if(S.interests.length&&z>=13)await fetchPOIs(b,S.interests);if(z>=14){showTr=true;$('#fTr').classList.add('on');await fetchTransports(bbox(clampB(b)))}}catch(e){fail++}
   busy();refreshMarkers();toast(fail?`Zone prête (${fail} éléments manquants)`:'Zone prête pour le hors-ligne ✔',3500)}
 async function tileCount(){try{return tileCache?(await tileCache.keys()).length:0}catch(e){return 0}}
 
