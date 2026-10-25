@@ -927,26 +927,37 @@ function ingest(els,mode){
   idbPut(add);return add.length}
 const bbox=b=>`(${b.getSouth().toFixed(5)},${b.getWest().toFixed(5)},${b.getNorth().toFixed(5)},${b.getEast().toFixed(5)})`;
 function clampB(b){const c=b.getCenter(),h=Math.min((b.getNorth()-b.getSouth())/2,0.02),w=Math.min((b.getEast()-b.getWest())/2,0.03);return L.latLngBounds([c.lat-h,c.lng-w],[c.lat+h,c.lng+w])}
+const pickTags=e=>{const o={};if(e)['opening_hours','website','contact:website','phone','contact:phone','cuisine','fee','wheelchair'].forEach(k=>{if(e[k])o[k]=e[k]});return o};
 const NOMI={musee:'museum',histoire:'monument',vue:'viewpoint',incontournable:'tourist attraction',sacre:'temple',nature:'park',plage:'beach',famille:'zoo',spa:'spa',resto:'restaurant',cafe:'cafe',marche:'market',nuit:'bar',shopping:'shopping mall',pratique:'pharmacy'};
 async function fetchNominatim(b,ids){
   b=clampB(b);let n=0;const vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].map(x=>x.toFixed(5)).join(',');
   for(const id of ids.slice(0,5)){
-    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&accept-language=fr&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(NOMI[id]));
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&accept-language=fr&extratags=1&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(NOMI[id]));
     if(!r.ok)throw new Error('erreur '+r.status);const a=await r.json();
-    a.forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;const p={id:pid,lat:+x.lat,lon:+x.lon,name:x.name||x.display_name.split(', ')[0],sub:'',cat:id,kind:'poi',tags:{}};POI.set(pid,p);n++});
+    a.forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;const p={id:pid,lat:+x.lat,lon:+x.lon,name:x.name||x.display_name.split(', ')[0],sub:'',cat:id,kind:'poi',tags:pickTags(x.extratags)};POI.set(pid,p);n++});
     refreshMarkers();await new Promise(r=>setTimeout(r,1100))}
   return n}
+let opDown=0;
 async function fetchPOIs(b,ids){
-  try{return await fetchPOIsOP(b,ids)}catch(e){
-    try{const n=await fetchNominatim(b,ids);if(n)toast('Serveur détaillé indisponible : résultats simplifiés',3500);return n}catch(e2){throw e}}}
+  if(Date.now()>opDown){try{return await fetchPOIsOP(b,ids)}catch(e){opDown=Date.now()+600000}}
+  const n=await fetchNominatim(b,ids);toast('Mode simplifié : serveurs détaillés injoignables',3200);return n}
 async function fetchPOIsOP(b,ids){
   b=clampB(b);let n=0,err=null;const pending=[...ids];
   const run=async()=>{while(pending.length){const id=pending.shift();
-    try{const d=await overpass(`[out:json][timeout:20];(${CATMAP[id].sel.map(x=>`nwr${x}${bbox(b)};`).join('')});out tags center qt 250;`);n+=ingest(d.elements,'poi');refreshMarkers()}catch(e){err=err||e}}};
+    try{const d=await overpass(`[out:json][timeout:20];(${CATMAP[id].sel.map(x=>`nwr${x}${bbox(b)};`).join('')});out tags center qt 250;`);n+=ingest(d.elements,'poi');refreshMarkers()}catch(e){err=err||e;pending.length=0}}};
   await Promise.all([run(),run()]);
   if(!n&&err)throw err;return n}
-async function fetchTransports(area){
-  const d=await overpass(`[out:json][timeout:20];(${TRSEL.map(s=>s+area+';').join('')});out tags center qt 500;`);return ingest(d.elements,'tr')}
+const NOMITR=[['metro','subway station'],['train','railway station'],['tram','tram stop'],['bus','bus stop']];
+async function fetchNominatimTr(c){
+  const b=L.latLngBounds([c.lat-0.012,c.lon-0.018],[c.lat+0.012,c.lon+0.018]),vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].map(x=>x.toFixed(5)).join(',');let n=0;
+  for(const [k,q] of NOMITR){
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=30&accept-language=fr&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(q));
+    if(!r.ok)throw new Error('erreur '+r.status);(await r.json()).forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;POI.set(pid,{id:pid,lat:+x.lat,lon:+x.lon,name:x.name||TRMAP[k].label,sub:'',cat:'tr:'+k,kind:'tr',tags:{}});n++});
+    refreshMarkers();await new Promise(r=>setTimeout(r,1100))}
+  return n}
+async function fetchTransports(area,c){
+  if(Date.now()>opDown){try{const d=await overpass(`[out:json][timeout:20];(${TRSEL.map(s=>s+area+';').join('')});out tags center qt 500;`);return ingest(d.elements,'tr')}catch(e){opDown=Date.now()+600000}}
+  return fetchNominatimTr(c)}
 
 /* ---------- marqueurs ---------- */
 let rt;
@@ -1021,7 +1032,7 @@ function closeSheet(){$('#sheet').classList.remove('on');document.body.classList
 async function refreshTr(id,silent){
   const p=find(id);if(!p)return;if(!navigator.onLine)return toast('Hors ligne : transports déjà en mémoire uniquement');
   if(!silent)busy('Recherche des transports…');
-  try{await fetchTransports(`(around:900,${p.lat},${p.lon})`);showTr=true;$('#fTr').classList.add('on');refreshMarkers();if(selId===id){const e=$('#trl');if(e)e.innerHTML=trListHtml(p)}}
+  try{await fetchTransports(`(around:900,${p.lat},${p.lon})`,{lat:p.lat,lon:p.lon});showTr=true;$('#fTr').classList.add('on');refreshMarkers();if(selId===id){const e=$('#trl');if(e)e.innerHTML=trListHtml(p)}}
   catch(e){if(!silent)toast('Transports : '+e.message,4000)}
   busy()}
 function focusPlace(id,open=true){const p=find(id);if(!p)return;setTab('carte');map.setView([p.lat,p.lon],Math.max(map.getZoom(),16));if(open)openPlace(id)}
@@ -1052,7 +1063,7 @@ async function prepareArea(){
     done++;busy(`Carte hors-ligne… ${done}/${list.length}`)}};
   await Promise.all([worker(),worker(),worker()]);
   busy('Lieux et transports…');
-  try{if(S.interests.length&&z>=13)await fetchPOIs(b,S.interests);if(z>=14){showTr=true;$('#fTr').classList.add('on');await fetchTransports(bbox(clampB(b)))}}catch(e){fail++}
+  try{if(S.interests.length&&z>=13)await fetchPOIs(b,S.interests);if(z>=14){showTr=true;$('#fTr').classList.add('on');await fetchTransports(bbox(clampB(b)),{lat:b.getCenter().lat,lon:b.getCenter().lng})}}catch(e){fail++}
   busy();refreshMarkers();toast(fail?`Zone prête (${fail} éléments manquants)`:'Zone prête pour le hors-ligne ✔',3500)}
 async function tileCount(){try{return tileCache?(await tileCache.keys()).length:0}catch(e){return 0}}
 
@@ -1189,7 +1200,7 @@ const H={
   async diag(){const o=$('#diag');o.textContent='Test en cours…';let out='En ligne : '+(navigator.onLine?'oui':'non')+'\n';
     const T=[...EPS.map(e=>[e.replace('/interpreter','/status'),e.replace('https://','').split('/')[0]]),['https://nominatim.openstreetmap.org/status.php','nominatim'],['https://tile.openstreetmap.org/0/0/0.png','tuiles carte']];
     await Promise.all(T.map(async([u,n])=>{const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),10000);
-      try{const r=await fetch(u,{signal:ac.signal});out+=`${n} : ${r.ok?'OK':'erreur '+r.status} (${Math.round(performance.now()-t0)} ms)\n`}
+      try{const r=await fetch(u,{signal:ac.signal});if(r.ok&&/overpass/.test(n))opDown=0;out+=`${n} : ${r.ok?'OK':'erreur '+r.status} (${Math.round(performance.now()-t0)} ms)\n`}
       catch(e){out+=`${n} : ${e.name==='AbortError'?'pas de réponse en 10 s':'bloqué ou injoignable'}\n`}clearTimeout(to)}));
     o.textContent=out},
   tilesave(){const v=$('#tileIn').value.trim();if(!/\{z\}/.test(v)||!/\{x\}/.test(v)||!/\{y\}/.test(v))return toast('L’adresse doit contenir {z}, {x} et {y}');S.tile=v;save();map.removeLayer(baseLayer);baseLayer=new CachedTiles(v,{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);toast('Fond de carte mis à jour')},
@@ -1217,7 +1228,7 @@ $('#fLoc').onclick=()=>locate(true);
 $('#fDl').onclick=prepareArea;
 $('#fTr').onclick=async()=>{showTr=!showTr;$('#fTr').classList.toggle('on',showTr);refreshMarkers();
   if(showTr){const c=map.getCenter();const ref=pos||{lat:c.lat,lon:c.lng};
-    if(!nearbyTr(ref.lat,ref.lon,700).length){if(!navigator.onLine)return toast('Aucun transport en mémoire ici');busy('Recherche des transports…');try{await fetchTransports(`(around:800,${ref.lat},${ref.lon})`);refreshMarkers()}catch(e){toast('Transports : '+e.message,4000)}busy()}}};
+    if(!nearbyTr(ref.lat,ref.lon,700).length){if(!navigator.onLine)return toast('Aucun transport en mémoire ici');busy('Recherche des transports…');try{await fetchTransports(`(around:800,${ref.lat},${ref.lon})`,ref);refreshMarkers()}catch(e){toast('Transports : '+e.message,4000)}busy()}}};
 $$('nav button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 document.addEventListener('click',e=>{if(!e.target.closest('#results,#sbox'))$('#results').hidden=true});
 map.on('click',()=>{if(tab==='carte')closeSheet()});
