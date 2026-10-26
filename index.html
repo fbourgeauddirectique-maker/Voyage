@@ -1207,6 +1207,7 @@ const newTrip=(name,country)=>({id:uid(),name,country:country||'',places:[],days
 let S=store.get('boussole.state',null);
 if(!S||!S.trips||!S.trips.length){const t=newTrip('Mon voyage','');S={trips:[t],cur:t.id,interests:['musee','histoire','resto'],tile:DEFAULT_TILE}}
 if(!Array.isArray(S.shown))S.shown=[...DEFAULT_SHOWN];S.shown=S.shown.filter(id=>CATMAP[id]);S.interests=(S.interests||[]).filter(id=>CATMAP[id]);
+S.trips.forEach(t=>t.places.forEach(p=>{if(p.lines&&!p.lines.length)delete p.lines}));
 S.trips.forEach(t=>t.days.forEach(d=>{if(d.real&&(d.real.sig||d.real.geo))d.real={}}));
 const save=()=>store.set('boussole.state',S);
 const trip=()=>S.trips.find(t=>t.id===S.cur)||S.trips[0];
@@ -1293,7 +1294,7 @@ function ingest(els,mode){
     else{const c=CATS.find(c=>c.test(t));if(!c)continue;cat=c.id;if(!name){if(!/^(plage|vue|pratique|marche|essence|recharge|eau|poste|banque|presse)$/.test(cat))continue;name=c.label}}
     if(t.name&&t.name!==name)sub=t.name;
     const keep={};['opening_hours','website','contact:website','phone','contact:phone','cuisine','fee','wheelchair','operator'].forEach(k=>{if(t[k])keep[k]=t[k]});
-    const p={id,lat,lon,name,sub,cat,kind,tags:keep};POI.set(id,p);add.push(p)}
+    const p={id,lat,lon,name,sub,cat,kind,tags:keep,osm:e.type+'/'+e.id};POI.set(id,p);add.push(p)}
   idbPut(add);return add.length}
 const bbox=b=>`(${b.getSouth().toFixed(5)},${b.getWest().toFixed(5)},${b.getNorth().toFixed(5)},${b.getEast().toFixed(5)})`;
 function clampB(b){const c=b.getCenter(),h=Math.min((b.getNorth()-b.getSouth())/2,0.02),w=Math.min((b.getEast()-b.getWest())/2,0.03);return L.latLngBounds([c.lat-h,c.lng-w],[c.lat+h,c.lng+w])}
@@ -1304,7 +1305,7 @@ async function fetchNominatim(b,ids){
   for(const [id,term] of ids.slice(0,5).flatMap(i=>[].concat(NOMI[i]).map(t=>[i,t]))){
     const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&accept-language=fr&extratags=1&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(term));
     if(!r.ok)throw new Error('erreur '+r.status);const a=await r.json();
-    a.forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;const p={id:pid,lat:+x.lat,lon:+x.lon,name:x.name||x.display_name.split(', ')[0],sub:'',cat:id,kind:'poi',tags:pickTags(x.extratags)};POI.set(pid,p);n++});
+    a.forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;const p={id:pid,lat:+x.lat,lon:+x.lon,name:x.name||x.display_name.split(', ')[0],sub:'',cat:id,kind:'poi',tags:pickTags(x.extratags),osm:x.osm_type+'/'+x.osm_id};POI.set(pid,p);n++});
     refreshMarkers();await new Promise(r=>setTimeout(r,1100))}
   return n}
 let opDown=0;
@@ -1322,7 +1323,7 @@ async function fetchNominatimTr(c){
   const b=L.latLngBounds([c.lat-0.012,c.lon-0.018],[c.lat+0.012,c.lon+0.018]),vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].map(x=>x.toFixed(5)).join(',');let n=0;
   for(const [k,q] of NOMITR){
     const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=30&accept-language=fr&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(q));
-    if(!r.ok)throw new Error('erreur '+r.status);(await r.json()).forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;POI.set(pid,{id:pid,lat:+x.lat,lon:+x.lon,name:x.name||TRMAP[k].label,sub:'',cat:'tr:'+k,kind:'tr',tags:{}});n++});
+    if(!r.ok)throw new Error('erreur '+r.status);(await r.json()).forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;POI.set(pid,{id:pid,lat:+x.lat,lon:+x.lon,name:x.name||TRMAP[k].label,sub:'',cat:'tr:'+k,kind:'tr',tags:{},osm:x.osm_type+'/'+x.osm_id});n++});
     refreshMarkers();await new Promise(r=>setTimeout(r,1100))}
   return n}
 async function fetchTransports(area,c){
@@ -1366,7 +1367,7 @@ async function doSearch(){
 
 /* ---------- lieux du voyage ---------- */
 const find=id=>trip().places.find(p=>p.id===id)||POI.get(id)||TEMP.get(id);
-function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines});save()}
+function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines,osm:p.osm});save()}
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
@@ -1379,28 +1380,42 @@ function nearbyTr(lat,lon,r=900){
   return [...seen.values()].sort((a,b)=>a.d-b.d).slice(0,7)}
 const OSMAPI='https://api.openstreetmap.org/api/0.6/';
 const RT={bus:'bus',trolleybus:'bus',tram:'tram',subway:'metro',light_rail:'metro',monorail:'metro',train:'train',ferry:'ferry'};
-const chipsHtml=p=>p.lines?p.lines.map(l=>`<span class="ln" style="--c:${TRMAP[l.t].color}" title="${esc(l.n?'vers '+l.n:'')}">${esc(l.r.length>7?l.r.slice(0,7):l.r)}</span>`).join(''):'';
-async function osmRels(id){const t={n:'node',w:'way',r:'relation'}[id[0]];if(!t)return[];const r=await fetch(`${OSMAPI}${t}/${id.slice(1)}/relations.json`);if(!r.ok)throw new Error('osm');return (await r.json()).elements||[]}
+const LB=new Set();
+const lnTxt=c=>{const m=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c||'');if(!m)return'#fff';let h=m[1];if(h.length===3)h=h.replace(/./g,x=>x+x);const v=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16));return (0.299*v[0]+0.587*v[1]+0.114*v[2])/255>0.62?'#0F1B3D':'#fff'};
+const lnC=l=>{const c=l.c||TRMAP[l.t].color;return `<span class="ln" style="--c:${c};color:${lnTxt(c)}" title="${esc(l.n?'vers '+l.n:'')}">${esc(l.r.length>10?l.r.slice(0,10):l.r)}</span>`};
+const chipsHtml=p=>p.lines?p.lines.map(lnC).join(''):'';
+const osmOf=p=>{if(p.osm)return p.osm;const m=/^n?([nwr])(\d+)$/.exec(p.id||'');return m?({n:'node',w:'way',r:'relation'}[m[1]])+'/'+m[2]:null};
+function lineOf(t){
+  const k=RT[t.route];if(!k)return null;let ref=(t.ref||t['ref:fr']||t.line||'').trim();
+  if(!ref){const nm=t['name:fr']||t['name:en']||t.name||'',m=/(?:bus|métro|metro|tram|tramway|ligne|line|RER|train)\s*([A-Z0-9]{1,4})\b/i.exec(nm);ref=m?m[1]:nm.split(/[:：]/)[0].trim().slice(0,12)}
+  if(!ref)return null;const c=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t.colour||'')?t.colour:'';
+  return{r:ref,t:k,n:t.to||'',c}}
+async function relsOf(osm){const r=await fetch(`${OSMAPI}${osm}/relations.json`);if(!r.ok)throw new Error('osm');return (await r.json()).elements||[]}
 async function getLines(p){
-  if(p.lines)return p.lines;if(!/^[nwr]\d+$/.test(p.id))return null;
-  const seen=new Map(),add=els=>els.forEach(e=>{const t=e.tags||{},k=RT[t.route];if(!k)return;const ref=t.ref||'';if(!ref)return;const key=k+'|'+ref;if(!seen.has(key))seen.set(key,{r:ref,t:k,n:t.to||''})});
-  const els=await osmRels(p.id);add(els);
-  if(!seen.size){const sa=els.find(e=>e.tags&&e.tags.public_transport==='stop_area');
-    if(sa){const rr=await fetch(`${OSMAPI}relation/${sa.id}.json`);if(rr.ok){const mem=(((await rr.json()).elements||[])[0]||{}).members||[];
-      for(const m of mem.filter(m=>m.type==='node').slice(0,8)){try{add(await osmRels('n'+m.ref))}catch(e){}}}}}
-  p.lines=[...seen.values()].sort((a,b)=>a.r.localeCompare(b.r,'fr',{numeric:true}));
-  const q=POI.get(p.id);if(q&&q!==p){q.lines=p.lines}if(q)idbPut([q]);
-  const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p){sv.lines=p.lines}if(sv)save();
+  if(p.lines)return p.lines;const osm=osmOf(p);if(!osm)return null;
+  const seen=new Map(),add=els=>els.forEach(e=>{const l=lineOf(e.tags||{});if(!l)return;const key=l.t+'|'+l.r;if(!seen.has(key))seen.set(key,l)});
+  const els=await relsOf(osm);add(els);
+  if(!seen.size){
+    let areas=els.filter(e=>e.tags&&e.tags.public_transport==='stop_area');
+    if(osm.startsWith('relation/')){const rr=await fetch(`${OSMAPI}${osm}.json`);if(rr.ok){const e0=((await rr.json()).elements||[])[0];if(e0&&e0.tags&&e0.tags.public_transport==='stop_area')areas=[e0,...areas]}}
+    const mem=new Map();
+    areas.slice(0,2).forEach(a=>(a.members||[]).forEach(m=>{if(m.type==='relation'||/entrance|exit/.test(m.role||''))return;const k=m.type+'/'+m.ref,pr=/stop|platform/.test(m.role||'')?0:1;if(!mem.has(k)||pr<mem.get(k))mem.set(k,pr)}));
+    const ks=[...mem.entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]).filter(k=>k!==osm).slice(0,14);
+    for(let i=0;i<ks.length;i+=4)await Promise.all(ks.slice(i,i+4).map(k=>relsOf(k).then(add).catch(()=>{})))}
+  p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):['metro','tram','train','bus','ferry'].indexOf(a.t)-['metro','tram','train','bus','ferry'].indexOf(b.t));
+  if(p.lines.length){const q=POI.get(p.id);if(q&&q!==p)q.lines=p.lines;if(q)idbPut([q]);const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p)sv.lines=p.lines;if(sv)save()}
   return p.lines}
 function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(m)m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><br>'+chipsHtml(p):'<small style="color:var(--mut)">Aucune ligne renseignée pour cet arrêt</small>'):(navigator.onLine?'<small style="color:var(--mut)">Recherche des lignes…</small>':'')}
 async function loadSheetLines(p){
   paintLines(p);if(!navigator.onLine)return;
   const rows=p.kind==='tr'?[p]:nearbyTr(p.lat,p.lon).map(x=>x.p),todo=rows.filter(q=>!q.lines);
-  for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(()=>{})));if(selId!==p.id)return;paintLines(p)}}
+  todo.forEach(q=>LB.add(q.id));paintLines(p);
+  for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(()=>{}).finally(()=>LB.delete(q.id))));if(selId!==p.id)return;paintLines(p)}
+  todo.forEach(q=>LB.delete(q.id));paintLines(p)}
 function trListHtml(p){
   const l=nearbyTr(p.lat,p.lon);
   if(!l.length)return '<div class="empty">Aucun transport en mémoire autour de ce lieu.</div>';
-  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i>${x.p.lines&&x.p.lines.length?'<div class="lns">'+chipsHtml(x.p)+'</div>':''}</button>`}).join('')}
+  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i>${x.p.lines&&x.p.lines.length?'<div class="lns">'+chipsHtml(x.p)+'</div>':(LB.has(x.p.id)?'<div class="lns"><small>lignes…</small></div>':'')}</button>`}).join('')}
 function openPlace(id){
   const p=find(id);if(!p)return;selId=id;const saved=trip().places.find(x=>x.id===id),c=catOf(p.cat),t=p.tags||{};
   const web=t.website||t['contact:website'],tel=t.phone||t['contact:phone'];
@@ -1472,7 +1487,7 @@ function legs(d){
     else{const m=hav(a.lat,a.lon,b.lat,b.lon);out.push({m,s:m*1.3/MODEMAP[mode].v+(mode==='transit'?600:0),real:false,mode,a,b})}}
   return out}
 let legOpen=null;const TRC=new Map();
-const lnChip=l=>`<span class="ln" style="--c:${TRMAP[l.t].color}">${esc(l.r.length>7?l.r.slice(0,7):l.r)}</span>`;
+const lnChip=lnC;
 function trDetHtml(k){const r=TRC.get(k);return r?r.html:'<small>Recherche des arrêts et des lignes…</small>'}
 async function loadTransit(a,b,k){
   TRC.set(k,null);let html;
@@ -1602,7 +1617,7 @@ const H={
   gotoPlace(el){$('#results').hidden=true;focusPlace(el.dataset.id)},
   gotoRes(el){const r=$('#results')._res[+el.dataset.i];$('#results').hidden=true;if(!r)return;
     const id='s'+r.osm_type[0]+r.osm_id,parts=r.display_name.split(', ');
-    const p={id,lat:+r.lat,lon:+r.lon,name:r.name||parts[0],sub:parts.slice(1,3).join(', '),cat:'autre',kind:'poi',tags:{}};TEMP.set(id,p);
+    const p={id,lat:+r.lat,lon:+r.lon,name:r.name||parts[0],sub:parts.slice(1,3).join(', '),cat:'autre',kind:'poi',tags:{},osm:r.osm_type+'/'+r.osm_id};TEMP.set(id,p);
     const bb=r.boundingbox.map(Number);map.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]],{maxZoom:17});
     if(tempMarker)map.removeLayer(tempMarker);tempMarker=L.marker([p.lat,p.lon],{icon:pin('#2457FF','📌',{saved:true})}).addTo(map);openPlace(id)},
   seg(el){lieuxSeg=el.dataset.v;renderLieux()},lf(el){lieuxFilter=el.dataset.v;renderLieux()},
@@ -1685,7 +1700,7 @@ if('serviceWorker' in navigator&&/^https?:/.test(location.protocol)){navigator.s
 
 /* ---------- démarrage ---------- */
 renderChips();setBase();
-idbReady.then(idbAll).then(a=>{a.forEach(p=>POI.set(p.id,p));refreshMarkers()});
+idbReady.then(idbAll).then(a=>{a.forEach(p=>{if(p.lines&&!p.lines.length)delete p.lines;POI.set(p.id,p)});refreshMarkers()});
 refreshMarkers();
 if(!v0)setTimeout(()=>locate(true),400);
 window.__boussole={S,H,map,POI};
