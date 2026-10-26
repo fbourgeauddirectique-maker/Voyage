@@ -1126,6 +1126,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const APP_VERSION='26 oct. 2026 · v14';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1319,13 +1320,39 @@ async function fetchPOIsOP(b,ids){
   await Promise.all([run(),run()]);
   if(!n&&err)throw err;return n}
 const NOMITR=[['metro','subway station'],['train','railway station'],['tram','tram stop'],['bus','bus stop']];
+const TR_OK=/^(station|halt|tram_stop|bus_stop|bus_station|stop_position|platform|stop|stop_area|ferry_terminal)$/;
+const TR_PRI={station:0,halt:1,tram_stop:1,bus_stop:1,bus_station:1,ferry_terminal:1,stop_area:2,stop_position:3,stop:3,platform:4};
+const LBLRE=/^(m[ée]tro|metro|subway|tram(?:way)?|ligne|line|bus|rer|train)\s*([A-Z]?\d{1,3}[A-Za-z]?|[A-Z])\s*$/i;
+const LBLT={'métro':'metro',metro:'metro',subway:'metro',tram:'tram',tramway:'tram',bus:'bus',rer:'train',train:'train'};
+const RANKTR={metro:0,train:1,tram:2,bus:3};
+const nrm=n=>String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9fff]+/g,'');
+function mergeTr(c){
+  const nk=nrm(c.name),kk=c.cat.slice(3),rail=kk!=='bus',lim=rail?150:80;
+  if(!nk){POI.set(c.id,c);return c}
+  let e=null;POI.forEach(q=>{if(e||q.kind!=='tr'||nrm(q.name)!==nk)return;if((q.cat.slice(3)==='bus')!==(kk==='bus'))return;if(hav(q.lat,q.lon,c.lat,c.lon)<=lim)e=q});
+  if(!e){POI.set(c.id,c);return c}
+  if(c.pri<(e.pri==null?5:e.pri)){if(e.osm&&e.osm!==c.osm)(e.alts=e.alts||[]).push(e.osm);e.osm=c.osm;e.pri=c.pri;e.lat=c.lat;e.lon=c.lon}
+  else if(c.osm!==e.osm&&!(e.alts||[]).includes(c.osm))(e.alts=e.alts||[]).push(c.osm);
+  if(rail&&RANKTR[kk]<RANKTR[e.cat.slice(3)])e.cat=c.cat;
+  return e}
 async function fetchNominatimTr(c){
-  const b=L.latLngBounds([c.lat-0.012,c.lon-0.018],[c.lat+0.012,c.lon+0.018]),vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].map(x=>x.toFixed(5)).join(',');let n=0;
+  const b=L.latLngBounds([c.lat-0.012,c.lon-0.018],[c.lat+0.012,c.lon+0.018]),vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].map(x=>x.toFixed(5)).join(',');
+  let n=0;const labels=[],touched=new Set();
   for(const [k,q] of NOMITR){
-    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=30&accept-language=fr&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(q));
-    if(!r.ok)throw new Error('erreur '+r.status);(await r.json()).forEach(x=>{const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;POI.set(pid,{id:pid,lat:+x.lat,lon:+x.lon,name:x.name||TRMAP[k].label,sub:'',cat:'tr:'+k,kind:'tr',tags:{},osm:x.osm_type+'/'+x.osm_id});n++});
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&accept-language=fr&bounded=1&viewbox='+vb+'&q='+encodeURIComponent(q));
+    if(!r.ok)throw new Error('erreur '+r.status);
+    (await r.json()).forEach(x=>{
+      const nm=x.name||'',lm=LBLRE.exec(nm);
+      if(lm){labels.push({x,t:LBLT[lm[1].toLowerCase()]||k,ref:lm[2].toUpperCase()});return}
+      if(!TR_OK.test(x.type||''))return;
+      const pid='n'+x.osm_type[0]+x.osm_id;if(POI.has(pid))return;
+      const before=POI.size,e=mergeTr({id:pid,lat:+x.lat,lon:+x.lon,name:nm||TRMAP[k].label,sub:'',cat:'tr:'+k,kind:'tr',tags:{},osm:x.osm_type+'/'+x.osm_id,pri:TR_PRI[x.type]!=null?TR_PRI[x.type]:5});
+      touched.add(e);if(POI.size>before)n++});
     refreshMarkers();await new Promise(r=>setTimeout(r,1100))}
-  return n}
+  labels.forEach(({x,t,ref})=>{if(x.osm_type==='relation')return;let best=null,bd=80;
+    POI.forEach(q=>{if(q.kind!=='tr')return;const d=hav(q.lat,q.lon,+x.lat,+x.lon);if(d<bd){bd=d;best=q}});
+    if(best){best.hint=best.hint||[];if(!best.hint.some(h=>h.t===t&&h.r===ref))best.hint.push({r:ref,t,n:'',c:''});touched.add(best)}});
+  idbPut([...touched]);refreshMarkers();return n}
 async function fetchTransports(area,c){
   if(Date.now()>opDown){try{const d=await overpass(`[out:json][timeout:20];(${TRSEL.map(s=>s+area+';').join('')});out tags center qt 500;`);return ingest(d.elements,'tr')}catch(e){opDown=Date.now()+600000}}
   return fetchNominatimTr(c)}
@@ -1367,7 +1394,7 @@ async function doSearch(){
 
 /* ---------- lieux du voyage ---------- */
 const find=id=>trip().places.find(p=>p.id===id)||POI.get(id)||TEMP.get(id);
-function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines,osm:p.osm});save()}
+function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines,osm:p.osm,alts:p.alts,hint:p.hint});save()}
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
@@ -1390,32 +1417,46 @@ function lineOf(t){
   if(!ref){const nm=t['name:fr']||t['name:en']||t.name||'',m=/(?:bus|métro|metro|tram|tramway|ligne|line|RER|train)\s*([A-Z0-9]{1,4})\b/i.exec(nm);ref=m?m[1]:nm.split(/[:：]/)[0].trim().slice(0,12)}
   if(!ref)return null;const c=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t.colour||'')?t.colour:'';
   return{r:ref,t:k,n:t.to||'',c}}
-async function relsOf(osm){const r=await fetch(`${OSMAPI}${osm}/relations.json`);if(!r.ok)throw new Error('osm');return (await r.json()).elements||[]}
+const OSMAPIS=['https://api.openstreetmap.org/api/0.6/','https://www.openstreetmap.org/api/0.6/'];
+async function apiGet(path){let st=0;
+  for(const b of OSMAPIS){try{const r=await fetch(b+path);if(r.ok)return r;if(r.status===404||r.status===410)return null;st=r.status}catch(e){}}
+  throw new Error(st?'erreur '+st:'service OpenStreetMap injoignable')}
+async function relsOf(osm){const r=await apiGet(osm+'/relations.json');return r?((await r.json()).elements||[]):[]}
 async function getLines(p){
-  if(p.lines)return p.lines;const osm=osmOf(p);if(!osm)return null;
+  if(p.lines)return p.lines;const osm=osmOf(p);if(!osm)throw new Error('lieu sans identifiant OpenStreetMap');
   const seen=new Map(),add=els=>els.forEach(e=>{const l=lineOf(e.tags||{});if(!l)return;const key=l.t+'|'+l.r;if(!seen.has(key))seen.set(key,l)});
-  const els=await relsOf(osm);add(els);
-  if(!seen.size){
+  const scan=async o=>{
+    const els=await relsOf(o);add(els);if(seen.size)return;
     let areas=els.filter(e=>e.tags&&e.tags.public_transport==='stop_area');
-    if(osm.startsWith('relation/')){const rr=await fetch(`${OSMAPI}${osm}.json`);if(rr.ok){const e0=((await rr.json()).elements||[])[0];if(e0&&e0.tags&&e0.tags.public_transport==='stop_area')areas=[e0,...areas]}}
+    if(o.startsWith('relation/')){const rr=await apiGet(o+'.json').catch(()=>null);if(rr){const e0=((await rr.json()).elements||[])[0];if(e0&&e0.tags&&e0.tags.public_transport==='stop_area')areas=[e0,...areas]}}
     const mem=new Map();
     areas.slice(0,2).forEach(a=>(a.members||[]).forEach(m=>{if(m.type==='relation'||/entrance|exit/.test(m.role||''))return;const k=m.type+'/'+m.ref,pr=/stop|platform/.test(m.role||'')?0:1;if(!mem.has(k)||pr<mem.get(k))mem.set(k,pr)}));
-    const ks=[...mem.entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]).filter(k=>k!==osm).slice(0,14);
-    for(let i=0;i<ks.length;i+=4)await Promise.all(ks.slice(i,i+4).map(k=>relsOf(k).then(add).catch(()=>{})))}
-  p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):['metro','tram','train','bus','ferry'].indexOf(a.t)-['metro','tram','train','bus','ferry'].indexOf(b.t));
+    const ks=[...mem.entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]).filter(k=>k!==o).slice(0,14);
+    for(let i=0;i<ks.length;i+=4)await Promise.all(ks.slice(i,i+4).map(k=>relsOf(k).then(add).catch(()=>{})))};
+  let err=null,ok=false;
+  for(const o of [osm,...(p.alts||[]).slice(0,3)]){try{await scan(o);ok=true}catch(e){err=err||e}if(seen.size)break}
+  if(!ok&&err)throw err;
+  (p.hint||[]).forEach(h=>{const key=h.t+'|'+h.r;if(!seen.has(key))seen.set(key,h)});
+  const ORD=['metro','tram','train','bus','ferry'];
+  p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):ORD.indexOf(a.t)-ORD.indexOf(b.t));
   if(p.lines.length){const q=POI.get(p.id);if(q&&q!==p)q.lines=p.lines;if(q)idbPut([q]);const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p)sv.lines=p.lines;if(sv)save()}
   return p.lines}
-function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(m)m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><br>'+chipsHtml(p):'<small style="color:var(--mut)">Aucune ligne renseignée pour cet arrêt</small>'):(navigator.onLine?'<small style="color:var(--mut)">Recherche des lignes…</small>':'')}
+const LBERR=new Map();
+function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(!m)return;
+  const sm=t=>`<small style="color:var(--mut)">${t}</small>`;
+  m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><br>'+chipsHtml(p):sm('Aucune ligne renseignée pour cet arrêt dans OpenStreetMap'))
+   :LBERR.has(p.id)?sm('Lignes indisponibles : '+esc(LBERR.get(p.id))+'. ')+`<button class="btn sm" data-act="retryLines" data-id="${esc(p.id)}">Réessayer</button>`
+   :navigator.onLine?sm('Recherche des lignes…'):sm('Hors ligne : lignes non enregistrées pour cet arrêt')}
 async function loadSheetLines(p){
   paintLines(p);if(!navigator.onLine)return;
   const rows=p.kind==='tr'?[p]:nearbyTr(p.lat,p.lon).map(x=>x.p),todo=rows.filter(q=>!q.lines);
-  todo.forEach(q=>LB.add(q.id));paintLines(p);
-  for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(()=>{}).finally(()=>LB.delete(q.id))));if(selId!==p.id)return;paintLines(p)}
+  todo.forEach(q=>{LB.add(q.id);LBERR.delete(q.id)});paintLines(p);
+  for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(e=>{LBERR.set(q.id,e.message||'erreur')}).finally(()=>LB.delete(q.id))));if(selId!==p.id)return;paintLines(p)}
   todo.forEach(q=>LB.delete(q.id));paintLines(p)}
 function trListHtml(p){
   const l=nearbyTr(p.lat,p.lon);
   if(!l.length)return '<div class="empty">Aucun transport en mémoire autour de ce lieu.</div>';
-  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i>${x.p.lines&&x.p.lines.length?'<div class="lns">'+chipsHtml(x.p)+'</div>':(LB.has(x.p.id)?'<div class="lns"><small>lignes…</small></div>':'')}</button>`}).join('')}
+  return l.map(x=>{const c=catOf(x.p.cat);return `<button data-act="gotoPlace" data-id="${esc(x.p.id)}"><span>${c.icon}</span><b>${esc(x.p.name)}</b><i>${c.label} · ${fd(x.d)} · ${fm(x.d/1.25)} à pied</i>${x.p.lines&&x.p.lines.length?'<div class="lns">'+chipsHtml(x.p)+'</div>':(LB.has(x.p.id)?'<div class="lns"><small>lignes…</small></div>':(LBERR.has(x.p.id)?'<div class="lns"><small>lignes indisponibles</small></div>':''))}</button>`}).join('')}
 function openPlace(id){
   const p=find(id);if(!p)return;selId=id;const saved=trip().places.find(x=>x.id===id),c=catOf(p.cat),t=p.tags||{};
   const web=t.website||t['contact:website'],tel=t.phone||t['contact:phone'];
@@ -1603,7 +1644,7 @@ async function renderVoyage(){
   <input type="file" id="imp" accept="application/json,.json" hidden>
   <h4>Langue de la carte</h4><div class="seg"><button class="${S.lang==='fr'?'':'on'}" data-act="lang" data-v="local">Langue locale</button><button class="${S.lang==='fr'?'on':''}" data-act="lang" data-v="fr">Français</button></div><p class="sub">En français, les noms sont traduits quand OpenStreetMap les connaît ; sinon ils apparaissent en alphabet latin, puis dans la langue locale.</p>
   <h4>Fond de carte</h4><input type="text" id="tileIn" value="${esc(S.tile||DEFAULT_TILE)}" aria-label="Adresse du serveur de tuiles"><div class="btns"><button class="btn sm" data-act="tilesave">Enregistrer</button><button class="btn sm" data-act="tilereset">Par défaut</button></div>
-  <p class="sub">Par défaut, la carte OpenStreetMap est utilisée sans clé. Pour des téléchargements plus gros, indiquez votre propre serveur de tuiles.</p>`}
+  <p class="sub">Par défaut, la carte OpenStreetMap est utilisée sans clé. Pour des téléchargements plus gros, indiquez votre propre serveur de tuiles.</p><p class="sub" style="margin-top:18px">Version de l’appli : ${APP_VERSION}</p>`}
 
 /* ---------- actions ---------- */
 const download=(name,text,type)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)};
@@ -1636,6 +1677,7 @@ const H={
   draw(){drawDay(curDay())},
   legMode(el){const d=curDay();d.modes=d.modes||{};d.modes[el.dataset.id]=el.dataset.v;save();renderItin()},
   dayMode(el){const d=curDay();d.mode=el.dataset.v;d.modes={};save();renderItin()},
+  retryLines(el){const p=find(el.dataset.id);if(p){LBERR.delete(p.id);loadSheetLines(p)}},
   legLines(el){const t=trip(),a=t.places.find(p=>p.id===el.dataset.from),b=t.places.find(p=>p.id===el.dataset.to);if(!a||!b)return;const k=legKey(a,b,'transit');
     if(legOpen===k){legOpen=null;renderItin();return}legOpen=k;const r=TRC.get(k);if(!r)loadTransit(a,b,k);renderItin()},
   async real(){const d=curDay();if(await realRoute(d)){renderItin();drawDay(d)}},
@@ -1653,7 +1695,7 @@ const H={
   gpx(){const t=trip(),x=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');download((t.name||'voyage')+'.gpx',`<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="Boussole" xmlns="http://www.topografix.com/GPX/1/1">${t.places.map(p=>`<wpt lat="${p.lat}" lon="${p.lon}"><name>${x(p.name)}</name><desc>${x(catOf(p.cat).label+(p.note?' - '+p.note:''))}</desc></wpt>`).join('')}</gpx>`,'application/gpx+xml')},
   import(){$('#imp').click()},
   async diag(){const o=$('#diag');o.textContent='Test en cours…';let out='En ligne : '+(navigator.onLine?'oui':'non')+'\n';
-    const T=[...EPS.map(e=>[e.replace('/interpreter','/status'),e.replace('https://','').split('/')[0]]),['https://nominatim.openstreetmap.org/status.php','nominatim'],['https://tile.openstreetmap.org/0/0/0.png','tuiles carte']];
+    const T=[...EPS.map(e=>[e.replace('/interpreter','/status'),e.replace('https://','').split('/')[0]]),['https://nominatim.openstreetmap.org/status.php','nominatim'],['https://api.openstreetmap.org/api/0.6/capabilities.json','api lignes (OSM)'],['https://tile.openstreetmap.org/0/0/0.png','tuiles carte']];
     await Promise.all(T.map(async([u,n])=>{const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),10000);
       try{const r=await fetch(u,{signal:ac.signal});if(r.ok&&/overpass/.test(n))opDown=0;out+=`${n} : ${r.ok?'OK':'erreur '+r.status} (${Math.round(performance.now()-t0)} ms)\n`}
       catch(e){out+=`${n} : ${e.name==='AbortError'?'pas de réponse en 10 s':'bloqué ou injoignable'}\n`}clearTimeout(to)}));
@@ -1696,7 +1738,7 @@ map.on('contextmenu',e=>{
   const p={id:'c'+uid(),lat:+e.latlng.lat.toFixed(6),lon:+e.latlng.lng.toFixed(6),name:n.trim(),sub:'',cat:'autre',kind:'poi',tags:{}};addPlace(p);refreshMarkers();openPlace(p.id);toast('Repère ajouté au voyage')});
 function net(){$('#netpill').style.display=navigator.onLine?'none':'block'}
 addEventListener('online',net);addEventListener('offline',net);net();
-if('serviceWorker' in navigator&&/^https?:/.test(location.protocol)){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+if('serviceWorker' in navigator&&/^https?:/.test(location.protocol)){navigator.serviceWorker.register('sw.js').then(r=>r.update()).catch(()=>{})}
 
 /* ---------- démarrage ---------- */
 renderChips();setBase();
