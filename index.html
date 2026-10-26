@@ -1126,7 +1126,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v14';
+const APP_VERSION='26 oct. 2026 · v15';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1394,7 +1394,7 @@ async function doSearch(){
 
 /* ---------- lieux du voyage ---------- */
 const find=id=>trip().places.find(p=>p.id===id)||POI.get(id)||TEMP.get(id);
-function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines,osm:p.osm,alts:p.alts,hint:p.hint});save()}
+function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.places.push({id:p.id,name:p.name,sub:p.sub||'',lat:p.lat,lon:p.lon,cat:p.cat,kind:p.kind||'poi',note:'',done:false,tags:p.tags||{},lines:p.lines,lv:p.lv,osm:p.osm,alts:p.alts,hint:p.hint});save()}
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
@@ -1418,28 +1418,47 @@ function lineOf(t){
   if(!ref)return null;const c=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t.colour||'')?t.colour:'';
   return{r:ref,t:k,n:t.to||'',c}}
 const OSMAPIS=['https://api.openstreetmap.org/api/0.6/','https://www.openstreetmap.org/api/0.6/'];
+const LV=3,hasLines=q=>!!q.lines&&q.lv===LV;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function apiGet(path){let st=0;
-  for(const b of OSMAPIS){try{const r=await fetch(b+path);if(r.ok)return r;if(r.status===404||r.status===410)return null;st=r.status}catch(e){}}
+  for(const b of OSMAPIS){for(let k=0;k<2;k++){try{const r=await fetch(b+path);if(r.ok)return r;if(r.status===404||r.status===410)return null;st=r.status;if(r.status!==429&&r.status!==509)break;await sleep(1500)}catch(e){break}}}
   throw new Error(st?'erreur '+st:'service OpenStreetMap injoignable')}
-async function relsOf(osm){const r=await apiGet(osm+'/relations.json');return r?((await r.json()).elements||[]):[]}
+const RELC=new Map();
+function cached(key,fn){if(!RELC.has(key))RELC.set(key,fn().catch(e=>{RELC.delete(key);throw e}));return RELC.get(key)}
+const relsOf=o=>cached('p:'+o,async()=>{const r=await apiGet(o+'/relations.json');return r?((await r.json()).elements||[]):[]});
+const relOne=o=>cached('o:'+o,async()=>{const r=await apiGet(o+'.json');return r?(((await r.json()).elements||[])[0]||null):null});
+const ROUTES='bus|trolleybus|tram|subway|light_rail|monorail|train|ferry';
+const reEsc=t=>String(t).replace(/[.*+?^${}()|[\]\\"]/g,'\\$&');
+async function overpassLines(p){
+  const names=[...new Set([p.name,p.sub].filter(Boolean))].map(reEsc).join('|');if(!names)return null;
+  const f=`[~"^(name|name:fr|name:en)$"~"^(${names})$"]`,q=`[out:json][timeout:25];(node(around:300,${p.lat},${p.lon})${f};way(around:300,${p.lat},${p.lon})${f}["public_transport"];)->.s;(rel(bn.s)[route~"^(${ROUTES})$"];rel(bw.s)[route~"^(${ROUTES})$"];);out tags;`;
+  return (await overpass(q,10000)).elements||[]}
 async function getLines(p){
-  if(p.lines)return p.lines;const osm=osmOf(p);if(!osm)throw new Error('lieu sans identifiant OpenStreetMap');
+  if(hasLines(p))return p.lines;const osm=osmOf(p);if(!osm)throw new Error('lieu sans identifiant OpenStreetMap');
   const seen=new Map(),add=els=>els.forEach(e=>{const l=lineOf(e.tags||{});if(!l)return;const key=l.t+'|'+l.r;if(!seen.has(key))seen.set(key,l)});
-  const scan=async o=>{
-    const els=await relsOf(o);add(els);if(seen.size)return;
-    let areas=els.filter(e=>e.tags&&e.tags.public_transport==='stop_area');
-    if(o.startsWith('relation/')){const rr=await apiGet(o+'.json').catch(()=>null);if(rr){const e0=((await rr.json()).elements||[])[0];if(e0&&e0.tags&&e0.tags.public_transport==='stop_area')areas=[e0,...areas]}}
-    const mem=new Map();
-    areas.slice(0,2).forEach(a=>(a.members||[]).forEach(m=>{if(m.type==='relation'||/entrance|exit/.test(m.role||''))return;const k=m.type+'/'+m.ref,pr=/stop|platform/.test(m.role||'')?0:1;if(!mem.has(k)||pr<mem.get(k))mem.set(k,pr)}));
-    const ks=[...mem.entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]).filter(k=>k!==o).slice(0,14);
-    for(let i=0;i<ks.length;i+=4)await Promise.all(ks.slice(i,i+4).map(k=>relsOf(k).then(add).catch(()=>{})))};
-  let err=null,ok=false;
-  for(const o of [osm,...(p.alts||[]).slice(0,3)]){try{await scan(o);ok=true}catch(e){err=err||e}if(seen.size)break}
-  if(!ok&&err)throw err;
+  let done=false;
+  if(Date.now()>opDown){try{const els=await overpassLines(p);if(els&&els.length){add(els);done=seen.size>0}}catch(e){opDown=Date.now()+600000}}
+  if(!done){
+    const scan=async o=>{
+      const els=await relsOf(o);add(els);
+      let areas=els.filter(e=>e.tags&&e.tags.public_transport==='stop_area');
+      if(o.startsWith('relation/')){const e0=await relOne(o).catch(()=>null);if(e0&&e0.tags&&e0.tags.public_transport==='stop_area'&&!areas.some(a=>a.id===e0.id))areas=[e0,...areas]}
+      const groups=[];
+      for(const a of areas.slice(0,3)){try{(await relsOf('relation/'+a.id)).forEach(g=>{if(g.tags&&g.tags.public_transport==='stop_area_group')groups.push(g)})}catch(e){}}
+      const ids=new Set(areas.map(a=>a.id));
+      for(const g of groups.slice(0,2))for(const m of (g.members||[])){if(m.type!=='relation'||ids.has(m.ref)||ids.size>=6)continue;ids.add(m.ref);const a=await relOne('relation/'+m.ref).catch(()=>null);if(a&&a.tags&&a.tags.public_transport==='stop_area')areas.push(a)}
+      const mem=new Map();
+      areas.slice(0,6).forEach(a=>(a.members||[]).forEach(m=>{if(m.type==='relation'||/entrance|exit/.test(m.role||''))return;const k=m.type+'/'+m.ref,pr=/stop|platform/.test(m.role||'')?0:1;if(!mem.has(k)||pr<mem.get(k))mem.set(k,pr)}));
+      const ks=[...mem.entries()].sort((a,b)=>a[1]-b[1]).map(x=>x[0]).filter(k=>k!==o).slice(0,30);
+      for(let i=0;i<ks.length;i+=5)await Promise.all(ks.slice(i,i+5).map(k=>relsOf(k).then(add).catch(()=>{})))};
+    let err=null,ok=false;
+    for(const o of [osm,...(p.alts||[]).slice(0,5)]){try{await scan(o);ok=true}catch(e){err=err||e}}
+    if(!ok&&err)throw err}
   (p.hint||[]).forEach(h=>{const key=h.t+'|'+h.r;if(!seen.has(key))seen.set(key,h)});
   const ORD=['metro','tram','train','bus','ferry'];
-  p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):ORD.indexOf(a.t)-ORD.indexOf(b.t));
-  if(p.lines.length){const q=POI.get(p.id);if(q&&q!==p)q.lines=p.lines;if(q)idbPut([q]);const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p)sv.lines=p.lines;if(sv)save()}
+  p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):ORD.indexOf(a.t)-ORD.indexOf(b.t));p.lv=LV;
+  const q=POI.get(p.id);if(q&&q!==p){q.lines=p.lines;q.lv=LV}if(q&&p.lines.length)idbPut([q]);
+  const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p){sv.lines=p.lines;sv.lv=LV}if(sv)save();
   return p.lines}
 const LBERR=new Map();
 function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(!m)return;
@@ -1449,7 +1468,7 @@ function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListH
    :navigator.onLine?sm('Recherche des lignes…'):sm('Hors ligne : lignes non enregistrées pour cet arrêt')}
 async function loadSheetLines(p){
   paintLines(p);if(!navigator.onLine)return;
-  const rows=p.kind==='tr'?[p]:nearbyTr(p.lat,p.lon).map(x=>x.p),todo=rows.filter(q=>!q.lines);
+  const rows=p.kind==='tr'?[p]:nearbyTr(p.lat,p.lon).map(x=>x.p),todo=rows.filter(q=>!hasLines(q));
   todo.forEach(q=>{LB.add(q.id);LBERR.delete(q.id)});paintLines(p);
   for(let i=0;i<todo.length;i+=3){await Promise.all(todo.slice(i,i+3).map(q=>getLines(q).catch(e=>{LBERR.set(q.id,e.message||'erreur')}).finally(()=>LB.delete(q.id))));if(selId!==p.id)return;paintLines(p)}
   todo.forEach(q=>LB.delete(q.id));paintLines(p)}
@@ -1535,7 +1554,7 @@ async function loadTransit(a,b,k){
   try{
     if(navigator.onLine)for(const p of [a,b])if(!nearbyTr(p.lat,p.lon,700).length)await fetchTransports(`(around:800,${p.lat},${p.lon})`,{lat:p.lat,lon:p.lon}).catch(()=>{});
     const side=p=>nearbyTr(p.lat,p.lon,700).filter(x=>!/^tr:(velo|taxi)$/.test(x.p.cat)).slice(0,6);
-    const A=side(a),B=side(b),need=[...A,...B].map(x=>x.p).filter(q=>!q.lines);
+    const A=side(a),B=side(b),need=[...A,...B].map(x=>x.p).filter(q=>!hasLines(q));
     if(navigator.onLine)for(let i=0;i<need.length;i+=3)await Promise.all(need.slice(i,i+3).map(q=>getLines(q).catch(()=>{})));
     const best=new Map();
     A.forEach(x=>(x.p.lines||[]).forEach(l=>B.forEach(y=>(y.p.lines||[]).forEach(m=>{
