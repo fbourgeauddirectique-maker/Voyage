@@ -756,6 +756,13 @@ textarea{min-height:76px;resize:vertical}
 .sinfo small{color:var(--mut);font-size:12.5px}
 .sact{display:flex;gap:4px}
 .leg{margin:0 0 0 28px;padding:7px 0 7px 22px;border-left:3px dotted var(--blue);color:var(--mut);font-size:13px;font-weight:700}
+.mch{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
+.mc{height:34px;min-width:38px;padding:0 10px;border-radius:17px;border:2px solid var(--line);background:var(--bg);font-size:15px;font-weight:800;color:var(--text)}
+.mc.on{border-color:var(--blue);background:var(--blue);color:#fff}
+.mc.lines{font-size:12.5px;border-color:var(--blue);color:var(--blue);background:none}
+.mgo{display:inline-flex;align-items:center;height:34px;padding:0 14px;border-radius:17px;background:var(--sun);color:#0F1B3D;font-weight:900;font-size:13px;text-decoration:none}
+.tdet{margin-top:8px;padding:10px 12px;background:var(--card);border-radius:12px;color:var(--text);font-weight:600;line-height:1.5;font-size:13.5px}
+.tl{margin:7px 0}
 .tot{margin:14px 0;padding:12px 14px;border-radius:14px;background:var(--ink);color:#fff;font-weight:800;display:flex;justify-content:space-between}
 .empty{padding:26px 16px;text-align:center;color:var(--mut);background:var(--card);border-radius:16px;font-size:14px;line-height:1.5}
 .chk{display:flex;align-items:center;gap:10px;padding:8px 2px}
@@ -1184,6 +1191,8 @@ const TRS=[
  {id:'taxi',label:'Taxis',icon:'🚕',color:'#E8A700'}];
 const TRMAP=Object.fromEntries(TRS.map(c=>[c.id,c]));
 const OTHER={id:'autre',label:'Lieu personnel',icon:'📌',color:'#2457FF'};
+const MODES=[{id:'walk',icon:'🚶',label:'À pied',color:'#FF3D8B',v:1.25},{id:'bike',icon:'🚲',label:'Vélo',color:'#18B84F',v:4},{id:'car',icon:'🚗',label:'Voiture',color:'#FF7A1A',v:8.3},{id:'taxi',icon:'🚕',label:'Taxi',color:'#E8A700',v:8.3},{id:'transit',icon:'🚇',label:'Transports',color:'#2457FF',v:5.5}];
+const MODEMAP=Object.fromEntries(MODES.map(m=>[m.id,m]));
 const catOf=id=>CATMAP[id]||(String(id).startsWith('tr:')&&TRMAP[id.slice(3)])||OTHER;
 const TRSEL=['node["railway"~"^(station|halt|tram_stop)$"]','node["highway"="bus_stop"]','nwr["amenity"~"^(ferry_terminal|bicycle_rental|taxi)$"]'];
 function trType(t){
@@ -1198,6 +1207,7 @@ const newTrip=(name,country)=>({id:uid(),name,country:country||'',places:[],days
 let S=store.get('boussole.state',null);
 if(!S||!S.trips||!S.trips.length){const t=newTrip('Mon voyage','');S={trips:[t],cur:t.id,interests:['musee','histoire','resto'],tile:DEFAULT_TILE}}
 if(!Array.isArray(S.shown))S.shown=[...DEFAULT_SHOWN];S.shown=S.shown.filter(id=>CATMAP[id]);S.interests=(S.interests||[]).filter(id=>CATMAP[id]);
+S.trips.forEach(t=>t.days.forEach(d=>{if(d.real&&(d.real.sig||d.real.geo))d.real={}}));
 const save=()=>store.set('boussole.state',S);
 const trip=()=>S.trips.find(t=>t.id===S.cur)||S.trips[0];
 const POI=new Map(),TEMP=new Map();
@@ -1360,7 +1370,9 @@ function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.pl
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
-const goUrl=p=>isIOS?`https://maps.apple.com/?daddr=${p.lat},${p.lon}&dirflg=w`:`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=walking`;
+const goUrl=(p,mode='walk',from=null)=>{const f=q=>q.lat+','+q.lon;
+  if(isIOS&&mode!=='bike')return `https://maps.apple.com/?${from?'saddr='+f(from)+'&':''}daddr=${f(p)}&dirflg=${{walk:'w',car:'d',taxi:'d',transit:'r'}[mode]||'w'}`;
+  return `https://www.google.com/maps/dir/?api=1${from?'&origin='+f(from):''}&destination=${f(p)}&travelmode=${{walk:'walking',bike:'bicycling',car:'driving',taxi:'driving',transit:'transit'}[mode]||'walking'}`};
 function nearbyTr(lat,lon,r=900){
   const seen=new Map();
   POI.forEach(p=>{if(p.kind!=='tr')return;const d=hav(lat,lon,p.lat,p.lon);if(d>r)return;const k=p.cat+'|'+p.name;const o=seen.get(k);if(!o||d<o.d)seen.set(k,{p,d})});
@@ -1404,7 +1416,7 @@ function openPlace(id){
   ${meta.length?`<p class="meta">${meta.join('<br>')}</p>`:''}
   ${p.kind==='tr'?'<div class="lns" id="myLines" style="padding-left:0;margin-top:8px"></div>':''}
   <div class="btns">${saved?`<button class="btn bad" data-act="unsave" data-id="${esc(id)}">Retirer du voyage</button>`:`<button class="btn pri" data-act="save" data-id="${esc(id)}">⭐ Ajouter au voyage</button>`}
-  <a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${goUrl(p)}" target="_blank" rel="noopener">Y aller à pied</a></div>
+  </div><p class="meta" style="margin:4px 0 0">Y aller depuis ma position :</p><div class="btns" style="margin-top:6px">${['walk','bike','transit','car','taxi'].map(m=>`<a class="mgo" style="background:var(--card);color:var(--text)" href="${goUrl(p,m)}" target="_blank" rel="noopener">${MODEMAP[m].icon} ${MODEMAP[m].label}</a>`).join('')}</div>
   ${saved?`<div class="line"><select data-chg="assignDay" data-id="${esc(id)}" aria-label="Jour"><option value="-1">Non planifié</option>${t0.days.map((d,i)=>`<option value="${i}"${dayOf(id)===i?' selected':''}>Jour ${i+1}</option>`).join('')}</select></div><textarea data-inp="note" data-id="${esc(id)}" placeholder="Une note : horaires, réservation, idée…">${esc(saved.note)}</textarea>`:''}
   ${p.kind==='tr'?'':`<h4 style="margin:16px 0 4px">Transports à proximité</h4><div class="trl" id="trl">${trListHtml(p)}</div><div class="btns"><button class="btn sm" data-act="refreshTr" data-id="${esc(id)}">Actualiser (en ligne)</button></div>`}`;
   $('#sheet').classList.add('on');document.body.classList.add('sheet-open');loadSheetLines(p);
@@ -1451,32 +1463,68 @@ async function tileCount(){try{return tileCache?(await tileCache.keys()).length:
 
 /* ---------- itinéraires ---------- */
 const dayPlaces=d=>d.stops.map(id=>trip().places.find(p=>p.id===id)).filter(Boolean);
+const modeOf=(d,id)=>(d.modes&&d.modes[id])||d.mode||'walk';
+const legKey=(a,b,m)=>a.id+'>'+b.id+'|'+(m==='taxi'?'car':m);
 function legs(d){
-  const ps=dayPlaces(d),sig=d.stops.join(),out=[];
-  for(let i=0;i<ps.length-1;i++){const r=d.real&&d.real.sig===sig&&d.real.legs[i];
-    if(r)out.push({m:r.d,s:r.t,real:true});else{const m=hav(ps[i].lat,ps[i].lon,ps[i+1].lat,ps[i+1].lon);out.push({m,s:m/1.25,real:false})}}
+  const ps=dayPlaces(d),out=[];
+  for(let i=0;i<ps.length-1;i++){const a=ps[i],b=ps[i+1],mode=modeOf(d,b.id),r=mode!=='transit'&&d.real&&d.real[legKey(a,b,mode)];
+    if(r)out.push({m:r.d,s:r.t,real:true,mode,a,b});
+    else{const m=hav(a.lat,a.lon,b.lat,b.lon);out.push({m,s:m*1.3/MODEMAP[mode].v+(mode==='transit'?600:0),real:false,mode,a,b})}}
   return out}
+let legOpen=null;const TRC=new Map();
+const lnChip=l=>`<span class="ln" style="--c:${TRMAP[l.t].color}">${esc(l.r.length>7?l.r.slice(0,7):l.r)}</span>`;
+function trDetHtml(k){const r=TRC.get(k);return r?r.html:'<small>Recherche des arrêts et des lignes…</small>'}
+async function loadTransit(a,b,k){
+  TRC.set(k,null);let html;
+  try{
+    if(navigator.onLine)for(const p of [a,b])if(!nearbyTr(p.lat,p.lon,700).length)await fetchTransports(`(around:800,${p.lat},${p.lon})`,{lat:p.lat,lon:p.lon}).catch(()=>{});
+    const side=p=>nearbyTr(p.lat,p.lon,700).filter(x=>!/^tr:(velo|taxi)$/.test(x.p.cat)).slice(0,6);
+    const A=side(a),B=side(b),need=[...A,...B].map(x=>x.p).filter(q=>!q.lines);
+    if(navigator.onLine)for(let i=0;i<need.length;i+=3)await Promise.all(need.slice(i,i+3).map(q=>getLines(q).catch(()=>{})));
+    const best=new Map();
+    A.forEach(x=>(x.p.lines||[]).forEach(l=>B.forEach(y=>(y.p.lines||[]).forEach(m=>{
+      if(m.t===l.t&&m.r===l.r&&x.p.id!==y.p.id){const key=l.t+'|'+l.r,sc=x.d+y.d,o=best.get(key);if(!o||sc<o.sc)best.set(key,{l,from:x,to:y,sc})}}))));
+    const com=[...best.values()].sort((p,q)=>p.sc-q.sc).slice(0,5);
+    const lst=(arr)=>arr.length?arr.slice(0,4).map(x=>`${catOf(x.p.cat).icon} ${esc(x.p.name)} <small>(${fd(x.d)})</small> ${chipsHtml(x.p)}`).join('<br>'):'<small>aucun arrêt connu à proximité</small>';
+    if(com.length)html=com.map(c=>`<div class="tl">${lnChip(c.l)} ${TRMAP[c.l.t].icon} <b>${esc(c.from.p.name)}</b> <small>(${fd(c.from.d)} à pied)</small> → <b>${esc(c.to.p.name)}</b> <small>(${fd(c.to.d)} à pied)</small></div>`).join('')+'<div class="tl"><small>Lignes issues d’OpenStreetMap : vérifiez le sens et les horaires avec « Guider ».</small></div>';
+    else html=`<div class="tl"><b>Pas de ligne directe trouvée.</b> Une correspondance est probable : « Guider » ouvre l’itinéraire complet dans votre appli de cartes.</div><div class="tl"><b>Départ</b><br>${lst(A)}</div><div class="tl"><b>Arrivée</b><br>${lst(B)}</div>`;
+  }catch(e){html='<small>Impossible de charger les arrêts pour le moment. « Guider » ouvre l’itinéraire dans votre appli de cartes.</small>'}
+  TRC.set(k,{html});if(tab==='itin'&&legOpen===k)renderItin()}
+function legHtml(l){
+  const m=MODEMAP[l.mode],k=legKey(l.a,l.b,l.mode),open=legOpen===k&&l.mode==='transit';
+  const est=l.mode==='transit'?' · estimé':(l.real?'':' · estimé à vol d’oiseau');
+  return `<div class="leg"><div>${m.icon} ${fd(l.m)} · ${fm(l.s)}${est}</div><div class="mch" role="group" aria-label="Mode de transport">${MODES.map(x=>`<button class="mc${x.id===l.mode?' on':''}" data-act="legMode" data-id="${esc(l.b.id)}" data-v="${x.id}" aria-label="${x.label}" aria-pressed="${x.id===l.mode}">${x.icon}</button>`).join('')}<a class="mgo" href="${goUrl(l.b,l.mode,l.a)}" target="_blank" rel="noopener">Guider</a>${l.mode==='transit'?`<button class="mc lines" data-act="legLines" data-from="${esc(l.a.id)}" data-to="${esc(l.b.id)}">${open?'Masquer les lignes':'Voir les lignes'}</button>`:''}</div>${open?`<div class="tdet">${trDetHtml(k)}</div>`:''}</div>`}
 function optimize(d){
   const ps=dayPlaces(d);if(ps.length<3)return false;const rest=ps.slice(1),out=[ps[0]];
   while(rest.length){const l=out[out.length-1];let bi=0,bd=1e18;rest.forEach((p,i)=>{const x=hav(l.lat,l.lon,p.lat,p.lon);if(x<bd){bd=x;bi=i}});out.push(rest.splice(bi,1)[0])}
   d.stops=out.map(p=>p.id);save();return true}
+const PROF={walk:['routed-foot','foot'],bike:['routed-bike','bike'],car:['routed-car','driving']};
+async function routeLeg(a,b,mode){
+  const pm=mode==='taxi'?'car':mode,[srv,prof]=PROF[pm],co=`${a.lon},${a.lat};${b.lon},${b.lat}`;
+  const urls=[`https://routing.openstreetmap.de/${srv}/route/v1/${prof}/${co}?overview=full&geometries=geojson`];
+  if(pm==='car')urls.push(`https://router.project-osrm.org/route/v1/driving/${co}?overview=full&geometries=geojson`);
+  for(const u of urls){const ac=new AbortController(),to=setTimeout(()=>ac.abort(),12000);
+    try{const r=await fetch(u,{signal:ac.signal});const j=await r.json();clearTimeout(to);if(j.code==='Ok'){const x=j.routes[0];return{geo:x.geometry.coordinates.map(c=>[c[1],c[0]]),d:x.distance,t:x.duration}}}catch(e){clearTimeout(to)}}
+  return null}
 async function realRoute(d){
-  const ps=dayPlaces(d);if(ps.length<2)return toast('Ajoutez au moins 2 lieux à ce jour');
-  if(!navigator.onLine)return toast('Hors ligne : tracé à vol d’oiseau uniquement');
-  busy('Calcul de l’itinéraire à pied…');
-  try{const u=`https://routing.openstreetmap.de/routed-foot/route/v1/foot/${ps.map(p=>p.lon+','+p.lat).join(';')}?overview=full&geometries=geojson`;
-    const j=await (await fetch(u)).json();if(j.code!=='Ok')throw 0;const r=j.routes[0];
-    d.real={sig:d.stops.join(),geo:r.geometry.coordinates.map(c=>[c[1],c[0]]),legs:r.legs.map(l=>({d:l.distance,t:l.duration}))};save();busy();toast('Itinéraire enregistré, utilisable hors ligne');return true}
-  catch(e){busy();toast('Calcul impossible pour le moment');return false}}
+  const L2=legs(d);if(!L2.length){toast('Ajoutez au moins 2 lieux à ce jour');return false}
+  if(!navigator.onLine){toast('Hors ligne : trajets estimés uniquement');return false}
+  if(!d.real||d.real.sig)d.real={};
+  const todo=L2.filter(l=>l.mode!=='transit'&&!l.real);
+  if(!todo.length){toast(L2.every(l=>l.mode==='transit')?'Transports : touchez « Voir les lignes » sur un trajet, ou « Guider »':'Trajets déjà enregistrés');return true}
+  let ok=0,ko=0;
+  for(let i=0;i<todo.length;i++){busy(`Calcul des trajets… ${i+1}/${todo.length}`);const l=todo[i],r=await routeLeg(l.a,l.b,l.mode);if(r){d.real[legKey(l.a,l.b,l.mode)]=r;ok++}else ko++}
+  save();busy();
+  toast(ko?`${ok} trajet(s) calculé(s), ${ko} échec(s) : serveur d’itinéraires injoignable. « Guider » reste disponible.`:'Trajets enregistrés, utilisables hors ligne',4200);return ok>0||!ko}
 function drawDay(d){
   routeLayer.clearLayers();const ps=dayPlaces(d);if(!ps.length)return;
-  const useReal=d.real&&d.real.sig===d.stops.join();
-  L.polyline(useReal?d.real.geo:ps.map(p=>[p.lat,p.lon]),{color:'#FF3D8B',weight:5,opacity:.9,dashArray:useReal?null:'8 10'}).addTo(routeLayer);
+  legs(d).forEach(l=>{const r=d.real&&d.real[legKey(l.a,l.b,l.mode)];
+    L.polyline(r&&l.mode!=='transit'?r.geo:[[l.a.lat,l.a.lon],[l.b.lat,l.b.lon]],{color:MODEMAP[l.mode].color,weight:5,opacity:.9,dashArray:r&&l.mode!=='transit'?null:'8 10'}).addTo(routeLayer)});
   ps.forEach((p,i)=>L.marker([p.lat,p.lon],{icon:pin(catOf(p.cat).color,i+1,{saved:true}),zIndexOffset:900,interactive:true}).on('click',()=>openPlace(p.id)).addTo(routeLayer));
   setTab('carte');map.fitBounds(L.latLngBounds(ps.map(p=>[p.lat,p.lon])).pad(.25),{maxZoom:17})}
 function gmapsDay(d){
-  const ps=dayPlaces(d);if(ps.length<2)return null;const f=p=>p.lat+','+p.lon;
-  return `https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=${f(ps[0])}&destination=${f(ps[ps.length-1])}`+(ps.length>2?`&waypoints=${encodeURIComponent(ps.slice(1,-1).slice(0,9).map(f).join('|'))}`:'')}
+  const ps=dayPlaces(d);if(ps.length<2)return null;const f=p=>p.lat+','+p.lon,m=d.mode||'walk',tm={walk:'walking',bike:'bicycling',car:'driving',taxi:'driving',transit:'transit'}[m];
+  return `https://www.google.com/maps/dir/?api=1&travelmode=${tm}&origin=${f(ps[0])}&destination=${f(ps[ps.length-1])}`+(ps.length>2&&m!=='transit'?`&waypoints=${encodeURIComponent(ps.slice(1,-1).slice(0,9).map(f).join('|'))}`:'')}
 
 /* ---------- panneaux ---------- */
 function setTab(t){
@@ -1505,12 +1553,13 @@ function renderLieux(){
 function renderItin(){
   const t=trip(),el=$('#p-itin');if(!(t.dayi>=0&&t.dayi<t.days.length))t.dayi=0;const d=t.days[t.dayi],ps=dayPlaces(d),lg=legs(d);
   let h=`<h2>Itinéraire</h2><p class="sub">${esc(t.name)}</p><div class="daybar">${t.days.map((x,i)=>`<button class="dchip${i===t.dayi?' on':''}" data-act="day" data-i="${i}">Jour ${i+1}</button>`).join('')}<button class="dchip" data-act="addday" aria-label="Ajouter un jour">＋</button></div>`;
+  h+=`<p class="sub" style="margin:12px 0 0">Mode pour tout ce jour</p><div class="mch" role="group">${MODES.map(x=>`<button class="mc${(d.mode||'walk')===x.id?' on':''}" data-act="dayMode" data-v="${x.id}">${x.icon} ${x.label}</button>`).join('')}</div>`;
   if(!ps.length)h+=`<div class="empty" style="margin-top:12px">Ce jour est vide. Ajoutez des lieux depuis la liste ci-dessous.</div>`;
   ps.forEach((p,i)=>{const c=catOf(p.cat);
     h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${c.color}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-id="${esc(p.id)}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-id="${esc(p.id)}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-id="${esc(p.id)}" aria-label="Retirer du jour">✕</button></div></div>`;
-    if(lg[i])h+=`<div class="leg">🚶 ${fd(lg[i].m)} · ${fm(lg[i].s)}${lg[i].real?'':' · à vol d’oiseau'}</div>`});
-  if(ps.length>1){const tm=lg.reduce((a,x)=>a+x.m,0),ts=lg.reduce((a,x)=>a+x.s,0);h+=`<div class="tot"><span>Marche du jour</span><span>${fd(tm)} · ${fm(ts)}</span></div>`}
-  h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer à pied (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
+    if(lg[i])h+=legHtml(lg[i])});
+  if(ps.length>1){const tm=lg.reduce((a,x)=>a+x.m,0),ts=lg.reduce((a,x)=>a+x.s,0);h+=`<div class="tot"><span>Trajets du jour</span><span>${fd(tm)} · ${fm(ts)}</span></div>`}
+  h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer les trajets (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
   const free=t.places.filter(p=>dayOf(p.id)<0);
   h+=`<h4>À planifier (${free.length})</h4>`+(free.length?free.map(p=>placeRow(p,{html:`<button class="mini pl" data-act="plan" data-id="${esc(p.id)}">+ Jour ${t.dayi+1}</button>`})).join(''):'<div class="empty">Tous vos lieux sont planifiés.</div>');
   el.innerHTML=h}
@@ -1570,6 +1619,10 @@ const H={
   down(el){const d=curDay(),i=d.stops.indexOf(el.dataset.id);if(i>=0&&i<d.stops.length-1){[d.stops[i+1],d.stops[i]]=[d.stops[i],d.stops[i+1]];save();renderItin()}},
   opt(){if(optimize(curDay())){renderItin();toast('Ordre optimisé (le 1er lieu reste en tête)')}else toast('Il faut au moins 3 lieux')},
   draw(){drawDay(curDay())},
+  legMode(el){const d=curDay();d.modes=d.modes||{};d.modes[el.dataset.id]=el.dataset.v;save();renderItin()},
+  dayMode(el){const d=curDay();d.mode=el.dataset.v;d.modes={};save();renderItin()},
+  legLines(el){const t=trip(),a=t.places.find(p=>p.id===el.dataset.from),b=t.places.find(p=>p.id===el.dataset.to);if(!a||!b)return;const k=legKey(a,b,'transit');
+    if(legOpen===k){legOpen=null;renderItin();return}legOpen=k;const r=TRC.get(k);if(!r)loadTransit(a,b,k);renderItin()},
   async real(){const d=curDay();if(await realRoute(d)){renderItin();drawDay(d)}},
   newtrip(){const n=prompt('Nom du voyage (ex. Kyoto, printemps 2027)');if(!n)return;const c=prompt('Pays ou destination (facultatif)')||'';const t=newTrip(n.trim(),c.trim());S.trips.push(t);S.cur=t.id;save();refreshMarkers();renderVoyage()},
   rename(){const t=trip(),n=prompt('Nouveau nom',t.name);if(n){t.name=n.trim();save();renderVoyage()}},
