@@ -725,7 +725,8 @@ body.sheet-open #searchHere,body.sheet-open #fabs{display:none!important}
 .btn.sm{height:34px;padding:0 12px;font-size:13px}
 .trl{margin:8px 0 0;display:grid;gap:6px}
 .trl button{display:flex;align-items:center;gap:10px;border:0;background:var(--card);border-radius:12px;padding:9px 12px;text-align:left;font-size:14px}
-.trl button{flex-wrap:wrap}.lns{flex-basis:100%;padding:2px 0 0 30px}.ln{display:inline-block;min-width:28px;padding:2px 8px;margin:3px 4px 0 0;border-radius:9px;background:var(--c);color:#fff;font-weight:900;font-size:12.5px;text-align:center}
+.trl button{flex-wrap:wrap}.lns{flex-basis:100%;padding:2px 0 0 30px}.lg{display:inline-flex;flex-wrap:wrap;align-items:center;margin:2px 10px 2px 0}.full .lg{display:flex;margin:4px 0}.lgi{font-size:12.5px;font-weight:800;margin-right:6px;color:var(--text);white-space:nowrap}.ln.t-bus{border-radius:5px!important}.ln.t-trolley{border-radius:5px!important}.ln.t-tram{border-radius:12px 4px 12px 4px!important}.ln.t-train{border-radius:3px!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.65)}.ln.t-ferry{border-radius:4px 14px!important}.ln.t-light,.ln.t-mono{border-radius:14px!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)}
+.ln{display:inline-block;min-width:28px;padding:2px 8px;margin:3px 4px 0 0;border-radius:9px;background:var(--c);color:#fff;font-weight:900;font-size:12.5px;text-align:center}
 .trl b{flex:1;font-weight:700}
 .trl i{font-style:normal;color:var(--mut);font-size:13px}
 textarea,input[type=text],input[type=number],select{width:100%;border:2px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px;font-size:15px}
@@ -1126,7 +1127,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v15';
+const APP_VERSION='26 oct. 2026 · v16';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1406,19 +1407,22 @@ function nearbyTr(lat,lon,r=900){
   POI.forEach(p=>{if(p.kind!=='tr')return;const d=hav(lat,lon,p.lat,p.lon);if(d>r)return;const k=p.cat+'|'+p.name;const o=seen.get(k);if(!o||d<o.d)seen.set(k,{p,d})});
   return [...seen.values()].sort((a,b)=>a.d-b.d).slice(0,7)}
 const OSMAPI='https://api.openstreetmap.org/api/0.6/';
-const RT={bus:'bus',trolleybus:'bus',tram:'tram',subway:'metro',light_rail:'metro',monorail:'metro',train:'train',ferry:'ferry'};
+const RT={bus:'bus',trolleybus:'trolley',tram:'tram',subway:'metro',light_rail:'light',monorail:'mono',train:'train',ferry:'ferry'};
 const LB=new Set();
 const lnTxt=c=>{const m=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c||'');if(!m)return'#fff';let h=m[1];if(h.length===3)h=h.replace(/./g,x=>x+x);const v=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16));return (0.299*v[0]+0.587*v[1]+0.114*v[2])/255>0.62?'#0F1B3D':'#fff'};
-const lnC=l=>{const c=l.c||TRMAP[l.t].color;return `<span class="ln" style="--c:${c};color:${lnTxt(c)}" title="${esc(l.n?'vers '+l.n:'')}">${esc(l.r.length>10?l.r.slice(0,10):l.r)}</span>`};
-const chipsHtml=p=>p.lines?p.lines.map(lnC).join(''):'';
-const osmOf=p=>{if(p.osm)return p.osm;const m=/^n?([nwr])(\d+)$/.exec(p.id||'');return m?({n:'node',w:'way',r:'relation'}[m[1]])+'/'+m[2]:null};
+const LTYPES={metro:{icon:'🚇',label:'Métro',color:'#2457FF'},light:{icon:'🚈',label:'Métro léger',color:'#5C7CFA'},mono:{icon:'🚝',label:'Monorail',color:'#7048E8'},tram:{icon:'🚊',label:'Tram',color:'#00A8E8'},train:{icon:'🚆',label:'Train / RER',color:'#0F1B3D'},trolley:{icon:'🚎',label:'Trolleybus',color:'#E8590C'},bus:{icon:'🚌',label:'Bus',color:'#FF7A1A'},ferry:{icon:'⛴️',label:'Bateau',color:'#00BFA6'}};
+const LORD=['metro','light','mono','tram','train','trolley','bus','ferry'];
+const LT=t=>LTYPES[t]||TRMAP[t]||{icon:'🚏',label:t,color:'#2457FF'};
+const lnC=l=>{const c=l.c||LT(l.t).color;return `<span class="ln t-${l.t}" style="--c:${c};color:${lnTxt(c)}" title="${esc(LT(l.t).label+' '+l.r+(l.n?' vers '+l.n:''))}">${esc(l.r.length>10?l.r.slice(0,10):l.r)}</span>`};
+const chipsHtml=(p,full)=>{if(!p.lines)return'';const g={};p.lines.forEach(l=>(g[l.t]=g[l.t]||[]).push(l));
+  return LORD.filter(t=>g[t]).concat(Object.keys(g).filter(t=>!LORD.includes(t))).map(t=>`<span class="lg"><span class="lgi" title="${esc(LT(t).label)}">${LT(t).icon}${full?' '+esc(LT(t).label):''}</span>${g[t].map(lnC).join('')}</span>`).join('')};const osmOf=p=>{if(p.osm)return p.osm;const m=/^n?([nwr])(\d+)$/.exec(p.id||'');return m?({n:'node',w:'way',r:'relation'}[m[1]])+'/'+m[2]:null};
 function lineOf(t){
   const k=RT[t.route];if(!k)return null;let ref=(t.ref||t['ref:fr']||t.line||'').trim();
   if(!ref){const nm=t['name:fr']||t['name:en']||t.name||'',m=/(?:bus|métro|metro|tram|tramway|ligne|line|RER|train)\s*([A-Z0-9]{1,4})\b/i.exec(nm);ref=m?m[1]:nm.split(/[:：]/)[0].trim().slice(0,12)}
   if(!ref)return null;const c=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t.colour||'')?t.colour:'';
   return{r:ref,t:k,n:t.to||'',c}}
 const OSMAPIS=['https://api.openstreetmap.org/api/0.6/','https://www.openstreetmap.org/api/0.6/'];
-const LV=3,hasLines=q=>!!q.lines&&q.lv===LV;
+const LV=4,hasLines=q=>!!q.lines&&q.lv===LV;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function apiGet(path){let st=0;
   for(const b of OSMAPIS){for(let k=0;k<2;k++){try{const r=await fetch(b+path);if(r.ok)return r;if(r.status===404||r.status===410)return null;st=r.status;if(r.status!==429&&r.status!==509)break;await sleep(1500)}catch(e){break}}}
@@ -1455,7 +1459,7 @@ async function getLines(p){
     for(const o of [osm,...(p.alts||[]).slice(0,5)]){try{await scan(o);ok=true}catch(e){err=err||e}}
     if(!ok&&err)throw err}
   (p.hint||[]).forEach(h=>{const key=h.t+'|'+h.r;if(!seen.has(key))seen.set(key,h)});
-  const ORD=['metro','tram','train','bus','ferry'];
+  const ORD=LORD;
   p.lines=[...seen.values()].sort((a,b)=>a.t===b.t?a.r.localeCompare(b.r,'fr',{numeric:true}):ORD.indexOf(a.t)-ORD.indexOf(b.t));p.lv=LV;
   const q=POI.get(p.id);if(q&&q!==p){q.lines=p.lines;q.lv=LV}if(q&&p.lines.length)idbPut([q]);
   const sv=trip().places.find(x=>x.id===p.id);if(sv&&sv!==p){sv.lines=p.lines;sv.lv=LV}if(sv)save();
@@ -1463,7 +1467,7 @@ async function getLines(p){
 const LBERR=new Map();
 function paintLines(p){const e=$('#trl');if(e&&p.kind!=='tr')e.innerHTML=trListHtml(p);const m=$('#myLines');if(!m)return;
   const sm=t=>`<small style="color:var(--mut)">${t}</small>`;
-  m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><br>'+chipsHtml(p):sm('Aucune ligne renseignée pour cet arrêt dans OpenStreetMap'))
+  m.innerHTML=p.lines?(p.lines.length?'<b style="font-size:13px">Lignes</b><div class="full">'+chipsHtml(p,true)+'</div>':sm('Aucune ligne renseignée pour cet arrêt dans OpenStreetMap'))
    :LBERR.has(p.id)?sm('Lignes indisponibles : '+esc(LBERR.get(p.id))+'. ')+`<button class="btn sm" data-act="retryLines" data-id="${esc(p.id)}">Réessayer</button>`
    :navigator.onLine?sm('Recherche des lignes…'):sm('Hors ligne : lignes non enregistrées pour cet arrêt')}
 async function loadSheetLines(p){
@@ -1561,7 +1565,7 @@ async function loadTransit(a,b,k){
       if(m.t===l.t&&m.r===l.r&&x.p.id!==y.p.id){const key=l.t+'|'+l.r,sc=x.d+y.d,o=best.get(key);if(!o||sc<o.sc)best.set(key,{l,from:x,to:y,sc})}}))));
     const com=[...best.values()].sort((p,q)=>p.sc-q.sc).slice(0,5);
     const lst=(arr)=>arr.length?arr.slice(0,4).map(x=>`${catOf(x.p.cat).icon} ${esc(x.p.name)} <small>(${fd(x.d)})</small> ${chipsHtml(x.p)}`).join('<br>'):'<small>aucun arrêt connu à proximité</small>';
-    if(com.length)html=com.map(c=>`<div class="tl">${lnChip(c.l)} ${TRMAP[c.l.t].icon} <b>${esc(c.from.p.name)}</b> <small>(${fd(c.from.d)} à pied)</small> → <b>${esc(c.to.p.name)}</b> <small>(${fd(c.to.d)} à pied)</small></div>`).join('')+'<div class="tl"><small>Lignes issues d’OpenStreetMap : vérifiez le sens et les horaires avec « Guider ».</small></div>';
+    if(com.length)html=com.map(c=>`<div class="tl">${lnChip(c.l)} <small>${LT(c.l.t).icon} ${esc(LT(c.l.t).label)}</small> <b>${esc(c.from.p.name)}</b> <small>(${fd(c.from.d)} à pied)</small> → <b>${esc(c.to.p.name)}</b> <small>(${fd(c.to.d)} à pied)</small></div>`).join('')+'<div class="tl"><small>Lignes issues d’OpenStreetMap : vérifiez le sens et les horaires avec « Guider ».</small></div>';
     else html=`<div class="tl"><b>Pas de ligne directe trouvée.</b> Une correspondance est probable : « Guider » ouvre l’itinéraire complet dans votre appli de cartes.</div><div class="tl"><b>Départ</b><br>${lst(A)}</div><div class="tl"><b>Arrivée</b><br>${lst(B)}</div>`;
   }catch(e){html='<small>Impossible de charger les arrêts pour le moment. « Guider » ouvre l’itinéraire dans votre appli de cartes.</small>'}
   TRC.set(k,{html});if(tab==='itin'&&legOpen===k)renderItin()}
