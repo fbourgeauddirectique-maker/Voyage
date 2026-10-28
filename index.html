@@ -1127,7 +1127,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v16';
+const APP_VERSION='26 oct. 2026 · v17';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1646,6 +1646,38 @@ function renderItin(){
 function interestsHtml(){
   return `<h4>Centres d’intérêt de la carte</h4><details id="intDet"><summary style="font-weight:800;padding:10px 0;cursor:pointer"><span id="intCnt">${S.shown.length} sur ${CATS.length}</span> affichés · toucher pour choisir</summary><div class="btns" style="margin:4px 0"><button class="btn sm" data-act="intAll">Tout cocher</button><button class="btn sm" data-act="intNone">Tout décocher</button></div>${GROUPS.map(g=>`<p class="sub" style="margin:14px 0 2px;font-weight:800">${g.t}</p>`+g.ids.map(id=>{const c=CATMAP[id];return `<label class="chk"><input type="checkbox" data-chg="shown" data-id="${id}"${S.shown.includes(id)?' checked':''}><span>${c.icon} ${c.label}</span></label>`}).join('')).join('')}</details><p class="sub">Les centres d’intérêt cochés deviennent des pastilles sur la carte, où vous activez ceux que vous voulez voir.</p>`}
 const updInt=()=>{const e=$('#intCnt');if(e)e.textContent=S.shown.length+' sur '+CATS.length;$$('#intDet input[type=checkbox]').forEach(c=>c.checked=S.shown.includes(c.dataset.id))};
+let BULK=[],BULKMSG='';
+function gParse(line){
+  const u=line.trim();if(!/^https?:\/\//i.test(u))return null;
+  if(/(maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/kgs)/i.test(u))return{short:true};
+  if(!/google\.[a-z.]+\/maps|maps\.google/i.test(u))return{other:true};
+  let d=u;try{d=decodeURIComponent(u)}catch(e){}
+  const m=/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/.exec(d)||/@(-?\d+\.\d+),(-?\d+\.\d+)/.exec(d)||/[?&](?:q|query|ll|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/.exec(d),nm=/\/place\/([^/@?]+)/.exec(d);
+  return{lat:m?+m[1]:null,lon:m?+m[2]:null,name:nm?nm[1].replace(/\+/g,' '):''}}
+function bulkHtml(){
+  const ok=BULK.filter(b=>b.cands&&b.on).length;
+  return (BULKMSG?`<p class="sub">${esc(BULKMSG)}</p>`:'')+BULK.map((b,i)=>b.err?`<div class="row"><div class="tx"><b style="white-space:normal">${esc(b.line.length>60?b.line.slice(0,58)+'…':b.line)}</b><small style="white-space:normal">${esc(b.err)}</small></div></div>`
+   :`<div class="row" style="align-items:flex-start"><input type="checkbox" data-chg="bulkon" data-i="${i}"${b.on?' checked':''} style="width:22px;height:22px;margin-top:6px;accent-color:var(--teal)" aria-label="Ajouter ce lieu"><div class="tx"><b style="white-space:normal">${esc(b.cands[b.sel].name)}</b><small style="white-space:normal">${esc(b.cands[b.sel].sub)}</small>${b.cands.length>1?`<select data-chg="bulksel" data-i="${i}" style="margin-top:6px" aria-label="Autre résultat">${b.cands.map((c,k)=>`<option value="${k}"${k===b.sel?' selected':''}>${esc((c.name+' — '+c.sub).slice(0,70))}</option>`).join('')}</select>`:''}</div></div>`).join('')
+   +(ok?`<div class="btns"><button class="btn pri" data-act="bulkAdd">Ajouter ${ok} lieu${ok>1?'x':''} et voir la carte</button></div>`:'')}
+const paintBulk=()=>{const e=$('#bulkOut');if(e)e.innerHTML=bulkHtml()};
+function bulkSection(){return `<h4>Ajouter des lieux en lot</h4><p class="sub">Collez des noms, des adresses ou des liens Google Maps complets, un par ligne. Ils seront ajoutés au voyage « ${esc(trip().name)} ».</p><textarea id="bulkIn" placeholder="Taipei 101&#10;Shilin Night Market&#10;Lungshan Temple, Taipei" style="min-height:110px"></textarea><div class="btns" style="margin-top:8px"><button class="btn sm pri" data-act="bulkFind">Chercher les lieux</button></div><div id="bulkOut">${bulkHtml()}</div>`}
+async function bulkFind(){
+  const lines=($('#bulkIn').value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,30);
+  if(!lines.length)return toast('Collez au moins un nom, une adresse ou un lien');
+  if(!navigator.onLine)return toast('Connectez-vous pour chercher les lieux');
+  BULK=[];
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i],g=gParse(line);BULKMSG=`Recherche… ${i+1}/${lines.length}`;paintBulk();
+    if(g&&g.short){BULK.push({line,err:'Lien court : Google ne permet pas de le lire depuis l’appli. Ouvrez-le, puis collez ici le nom ou l’adresse du lieu.'});continue}
+    if(g&&g.other){BULK.push({line,err:'Lien non reconnu : collez un nom, une adresse ou un lien Google Maps complet.'});continue}
+    if(g&&g.lat!=null){BULK.push({line,cands:[{id:'g'+Math.round(g.lat*1e5)+'_'+Math.round(g.lon*1e5),name:g.name||'Lieu Google Maps',sub:'Position lue dans le lien',lat:g.lat,lon:g.lon}],sel:0,on:true});continue}
+    const q=g?g.name:line;if(!q){BULK.push({line,err:'Rien à chercher dans ce lien.'});continue}
+    try{const r=await geocode(q);
+      const c=r.slice(0,3).map(x=>{const parts=x.display_name.split(', ');return{id:'s'+x.osm_type[0]+x.osm_id,name:x.name||parts[0],sub:parts.slice(1,4).join(', '),lat:+x.lat,lon:+x.lon,osm:x.osm_type+'/'+x.osm_id}});
+      BULK.push(c.length?{line,cands:c,sel:0,on:true}:{line,err:'Aucun résultat. Essayez avec le nom et la ville.'})}
+    catch(e){BULK.push({line,err:'Recherche impossible pour le moment.'})}
+    if(i<lines.length-1)await sleep(1100)}
+  BULKMSG='';paintBulk()}
 async function renderVoyage(){
   const t=trip(),el=$('#p-voyage'),n=await tileCount();
   const sums={};t.spend.forEach(x=>sums[x.cur]=(sums[x.cur]||0)+x.amt);
@@ -1653,6 +1685,7 @@ async function renderVoyage(){
   <div class="line"><select data-chg="trip" aria-label="Voyage actif">${S.trips.map(x=>`<option value="${x.id}"${x.id===t.id?' selected':''}>${esc(x.name)}${x.country?' · '+esc(x.country):''}</option>`).join('')}</select></div>
   <div class="btns" style="margin-top:4px"><button class="btn sm pri" data-act="newtrip">Nouveau voyage</button><button class="btn sm" data-act="rename">Renommer</button>${S.trips.length>1?'<button class="btn sm bad" data-act="deltrip">Supprimer</button>':''}</div>
   ${interestsHtml()}
+  ${bulkSection()}
   <h4>Infos pratiques</h4><textarea data-inp="notes" placeholder="Hôtel, wifi, numéros utiles, codes, adresses…" style="min-height:110px">${esc(t.notes)}</textarea>
   <h4>À ne pas oublier</h4>${t.checks.map((c,i)=>`<label class="chk${c.d?' done':''}"><input type="checkbox" data-chg="chk" data-i="${i}"${c.d?' checked':''}><span>${esc(c.t)}</span><button class="mini" data-act="chkdel" data-i="${i}" aria-label="Supprimer">✕</button></label>`).join('')}
   <div class="line"><input type="text" id="chkIn" placeholder="Ajouter un élément" enterkeyhint="done"><button class="btn sm pri" data-act="chkadd">Ajouter</button></div>
@@ -1724,6 +1757,11 @@ const H={
       catch(e){out+=`${n} : ${e.name==='AbortError'?'pas de réponse en 10 s':'bloqué ou injoignable'}\n`}clearTimeout(to)}));
     o.textContent=out},
   lang(el){S.lang=el.dataset.v;save();setBase().then(ok=>{if(S.lang==='fr'&&ok)toast('Carte en français : noms traduits quand ils existent',3500);renderVoyage()})},
+  bulkFind(){bulkFind()},
+  bulkAdd(){const t=trip(),add=[];
+    BULK.forEach(b=>{if(!b.cands||!b.on)return;const c=b.cands[b.sel];if(t.places.some(p=>p.id===c.id))return;const p={id:c.id,name:c.name,sub:c.sub,lat:c.lat,lon:c.lon,cat:'autre',kind:'poi',tags:{},osm:c.osm};addPlace(p);add.push(p)});
+    BULK=[];paintBulk();if(!add.length)return toast('Ces lieux sont déjà dans le voyage');
+    setTab('carte');refreshMarkers();map.fitBounds(L.latLngBounds(add.map(p=>[p.lat,p.lon])).pad(.3),{maxZoom:15});toast(`${add.length} lieu(x) ajouté(s) à « ${t.name} »`,3500)},
   intAll(){S.shown=CATS.map(c=>c.id);save();renderChips();updInt()},
   intNone(){S.shown=[];S.interests=[];save();renderChips();refreshMarkers();updInt()},
   tilesave(){const v=$('#tileIn').value.trim();if(!/\{z\}/.test(v)||!/\{x\}/.test(v)||!/\{y\}/.test(v))return toast('L’adresse doit contenir {z}, {x} et {y}');S.tile=v;save();setBase();toast('Fond de carte mis à jour')},
@@ -1735,6 +1773,8 @@ document.addEventListener('change',e=>{
   if(el.dataset.chg==='assignDay'){const id=el.dataset.id,v=+el.value;t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));if(v>=0)t.days[v].stops.push(id);save();refreshMarkers()}
   if(el.dataset.chg==='trip'){S.cur=el.value;save();const v=trip().view;if(v)map.setView(v.c,v.z);routeLayer.clearLayers();refreshMarkers();renderVoyage()}
   if(el.dataset.chg==='shown'){const id=el.dataset.id,i=S.shown.indexOf(id);if(el.checked&&i<0)S.shown.push(id);if(!el.checked&&i>=0){S.shown.splice(i,1);S.interests=S.interests.filter(x=>x!==id)}save();renderChips();refreshMarkers();updInt()}
+  if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
+  if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
   if(el.dataset.chg==='chk'){t.checks[+el.dataset.i].d=el.checked;save();renderVoyage()}});
 document.addEventListener('input',e=>{
   const el=e.target.closest('[data-inp]');if(!el)return;const t=trip();
