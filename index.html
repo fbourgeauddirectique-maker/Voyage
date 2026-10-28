@@ -1127,7 +1127,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v17';
+const APP_VERSION='26 oct. 2026 · v18';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1661,6 +1661,14 @@ function bulkHtml(){
    +(ok?`<div class="btns"><button class="btn pri" data-act="bulkAdd">Ajouter ${ok} lieu${ok>1?'x':''} et voir la carte</button></div>`:'')}
 const paintBulk=()=>{const e=$('#bulkOut');if(e)e.innerHTML=bulkHtml()};
 function bulkSection(){return `<h4>Ajouter des lieux en lot</h4><p class="sub">Collez des noms, des adresses ou des liens Google Maps complets, un par ligne. Ils seront ajoutés au voyage « ${esc(trip().name)} ».</p><textarea id="bulkIn" placeholder="Taipei 101&#10;Shilin Night Market&#10;Lungshan Temple, Taipei" style="min-height:110px"></textarea><div class="btns" style="margin-top:8px"><button class="btn sm pri" data-act="bulkFind">Chercher les lieux</button></div><div id="bulkOut">${bulkHtml()}</div>`}
+function addrVariants(line){
+  const out=[line];
+  const fl=x=>x.replace(/\s*(?:號|号)?\s*(?:B\d+|\d+\s*F|\d+樓)\s*$/i,m=>/號|号/.test(m)?'號':'');
+  const parts=line.split(',').map(x=>x.replace(/ta[iï]wan/ig,'').trim()).filter(x=>x&&!/^\d{3,6}$/.test(x)&&!/^r[ée]publique de chine$/i.test(x)&&!/\bvillage\b|里$/i.test(x)).map(fl);
+  const c=parts.join(', ');if(parts.length>1&&c!==line)out.push(c);
+  const road=parts.filter(x=>!/^(?:no\.?\s*)?\d+\s*(?:號|号)?$/i.test(x));
+  const r=road.join(', ');if(road.length>1&&r!==c&&road.length<parts.length)out.push(r);
+  return out}
 async function bulkFind(){
   const lines=($('#bulkIn').value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,30);
   if(!lines.length)return toast('Collez au moins un nom, une adresse ou un lien');
@@ -1672,9 +1680,11 @@ async function bulkFind(){
     if(g&&g.other){BULK.push({line,err:'Lien non reconnu : collez un nom, une adresse ou un lien Google Maps complet.'});continue}
     if(g&&g.lat!=null){BULK.push({line,cands:[{id:'g'+Math.round(g.lat*1e5)+'_'+Math.round(g.lon*1e5),name:g.name||'Lieu Google Maps',sub:'Position lue dans le lien',lat:g.lat,lon:g.lon}],sel:0,on:true});continue}
     const q=g?g.name:line;if(!q){BULK.push({line,err:'Rien à chercher dans ce lien.'});continue}
-    try{const r=await geocode(q);
-      const c=r.slice(0,3).map(x=>{const parts=x.display_name.split(', ');return{id:'s'+x.osm_type[0]+x.osm_id,name:x.name||parts[0],sub:parts.slice(1,4).join(', '),lat:+x.lat,lon:+x.lon,osm:x.osm_type+'/'+x.osm_id}});
-      BULK.push(c.length?{line,cands:c,sel:0,on:true}:{line,err:'Aucun résultat. Essayez avec le nom et la ville.'})}
+    try{const vs=g?[q]:addrVariants(q);let c=[],vi=0;
+      for(;vi<vs.length;vi++){if(vi)await sleep(1100);const r=await geocode(vs[vi]);
+        c=r.slice(0,3).map(x=>{const parts=x.display_name.split(', ');return{id:'s'+x.osm_type[0]+x.osm_id,name:x.name||parts[0],sub:(vi===2?'Rue trouvée, numéro non localisé · ':'')+parts.slice(1,4).join(', '),lat:+x.lat,lon:+x.lon,osm:x.osm_type+'/'+x.osm_id}});
+        if(c.length)break}
+      BULK.push(c.length?{line,cands:c,sel:0,on:true}:{line,err:'Aucun résultat. Essayez avec le nom du lieu (en chinois si possible) et la ville.'})}
     catch(e){BULK.push({line,err:'Recherche impossible pour le moment.'})}
     if(i<lines.length-1)await sleep(1100)}
   BULKMSG='';paintBulk()}
