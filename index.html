@@ -778,10 +778,11 @@ textarea{min-height:76px;resize:vertical}
 #toast{position:absolute;left:50%;top:calc(var(--sat) + 110px);transform:translateX(-50%);z-index:2000;background:var(--ink);color:#fff;border-radius:16px;padding:10px 16px;font-size:14px;font-weight:700;max-width:86%;text-align:center;display:none;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 #busy{position:absolute;left:50%;top:calc(var(--sat) + 110px);transform:translateX(-50%);z-index:2001;background:var(--sun);color:#0F1B3D;border-radius:16px;padding:10px 18px;font-size:14px;font-weight:800;display:none}
 .dbadge{position:absolute;top:-10px;right:-10px;min-width:19px;height:19px;padding:0 4px;border-radius:10px;background:var(--dc);color:var(--dt);font-size:11px;font-weight:900;display:grid;place-items:center;border:2px solid #fff;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.4)}
-#dayLegend{position:absolute;left:12px;bottom:128px;z-index:1000;display:flex;flex-wrap:wrap;gap:6px;max-width:62%}
+#dayLegend{position:absolute;left:12px;bottom:128px;z-index:1000;display:flex;flex-wrap:wrap;gap:6px;max-width:68%}
 #dayLegend:empty{display:none}
 #dayLegend .dl{height:30px;min-width:30px;padding:0 11px;border-radius:15px;border:2px solid #fff;background:var(--dc);color:var(--dt);font-weight:800;font-size:12.5px;box-shadow:0 2px 8px rgba(15,27,61,.35)}
 body.sheet-open #dayLegend{display:none!important}
+.dl.off{background:rgba(255,255,255,.92)!important;color:var(--dc)!important;border-color:var(--dc)!important;text-decoration:line-through;opacity:.85}
 .leaflet-control-attribution{font-size:10px!important}
 .leaflet-bottom.leaflet-left{bottom:0}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -1133,8 +1134,8 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v20';
-const MAX_TILES=350,MAX_MARKERS=450;
+const APP_VERSION='26 oct. 2026 · v21';
+const MAX_TILES=350,MAX_MARKERS=250;
 
 /* ---------- catégories ---------- */
 const re=(k,v)=>`["${k}"~"^(${v})$"]`;
@@ -1367,19 +1368,29 @@ async function fetchTransports(area,c){
   return fetchNominatimTr(c)}
 
 /* ---------- marqueurs ---------- */
-let rt;
+let rt,vt;
+const poiMk=new Map(),savedMk=new Map();
+function syncMarkers(cache,layer,items){
+  const keep=new Set(items.map(x=>x.key));
+  cache.forEach((v,k)=>{if(!keep.has(k)){layer.removeLayer(v.m);cache.delete(k)}});
+  items.forEach(x=>{const o=cache.get(x.key);if(o&&o.sig===x.sig)return;if(o)layer.removeLayer(o.m);const m=x.make();layer.addLayer(m);cache.set(x.key,{m,sig:x.sig})})}
+const dayHidden=(t,di)=>di>=0&&!!t.hiddenDays&&t.hiddenDays.includes(t.days[di].id);
 function refreshMarkers(){
-  poiLayer.clearLayers();savedLayer.clearLayers();
-  const b=map.getBounds().pad(.15),c=map.getCenter(),sel=new Set(S.interests),saved=new Set(trip().places.map(p=>p.id));let arr=[];
+  const t=trip(),b=map.getBounds().pad(.15),c=map.getCenter(),sel=new Set(S.interests),saved=new Set(t.places.map(p=>p.id));let arr=[];
   POI.forEach(p=>{if(saved.has(p.id)||!b.contains([p.lat,p.lon]))return;if(p.kind==='tr'){if(!showTr)return}else if(!sel.has(p.cat))return;arr.push(p)});
-  if(arr.length>MAX_MARKERS){arr.sort((a,b)=>hav(c.lat,c.lng,a.lat,a.lon)-hav(c.lat,c.lng,b.lat,b.lon));arr=arr.slice(0,MAX_MARKERS)}
-  arr.forEach(p=>{const m=catOf(p.cat);L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{size:p.kind==='tr'?28:34}),keyboard:false}).on('click',()=>openPlace(p.id)).addTo(poiLayer)});
-  trip().places.forEach(p=>{const m=catOf(p.cat),di=dayOf(p.id);L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{saved:true,ring:di>=0?dayCol(di):undefined,badge:di>=0?di+1:0}),zIndexOffset:600,keyboard:false}).on('click',()=>openPlace(p.id)).addTo(savedLayer)});
+  const cap=map.getZoom()<14?120:MAX_MARKERS;
+  if(arr.length>cap){arr.sort((a,b)=>hav(c.lat,c.lng,a.lat,a.lon)-hav(c.lat,c.lng,b.lat,b.lon));arr=arr.slice(0,cap)}
+  syncMarkers(poiMk,poiLayer,arr.map(p=>({key:p.id,sig:p.cat,make:()=>{const m=catOf(p.cat);return L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{size:p.kind==='tr'?28:34}),keyboard:false}).on('click',()=>openPlace(p.id))}})));
+  const vis=t.places.filter(p=>{const di=dayOf(p.id);return di>=0?!dayHidden(t,di):!t.hideFree});
+  syncMarkers(savedMk,savedLayer,vis.map(p=>{const di=dayOf(p.id);return{key:p.id,sig:p.cat+'|'+di,make:()=>{const m=catOf(p.cat);return L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{saved:true,ring:di>=0?dayCol(di):undefined,badge:di>=0?di+1:0}),zIndexOffset:600,keyboard:false}).on('click',()=>openPlace(p.id))}}}));
   renderLegend()}
 function renderLegend(){const t=trip(),el=$('#dayLegend');if(!el)return;
-  const days=t.days.map((d,i)=>({i,n:d.stops.filter(id=>t.places.some(p=>p.id===id)).length})).filter(x=>x.n);
-  el.innerHTML=days.length?days.map(x=>`<button class="dl" style="--dc:${dayCol(x.i)};--dt:${lnTxt(dayCol(x.i))}" data-act="dayFocus" data-i="${x.i}">Jour ${x.i+1}</button>`).join('')+'<button class="dl" style="--dc:#fff;--dt:#0F1B3D" data-act="clearRoute" aria-label="Effacer le tracé">✕</button>':''}
-map.on('moveend',()=>{const t=trip(),c=map.getCenter();t.view={c:[+c.lat.toFixed(5),+c.lng.toFixed(5)],z:map.getZoom()};save();clearTimeout(rt);rt=setTimeout(refreshMarkers,180)});
+  const days=t.days.map((d,i)=>({i,n:d.stops.filter(id=>t.places.some(p=>p.id===id)).length})).filter(x=>x.n),free=t.places.filter(p=>dayOf(p.id)<0).length;
+  if(!days.length&&!free){el.innerHTML='';return}
+  el.innerHTML=days.map(x=>{const off=dayHidden(t,x.i);return `<button class="dl${off?' off':''}" style="--dc:${dayCol(x.i)};--dt:${lnTxt(dayCol(x.i))}" data-act="dayToggle" data-i="${x.i}" aria-pressed="${!off}">Jour ${x.i+1}</button>`}).join('')
+   +(free?`<button class="dl${t.hideFree?' off':''}" style="--dc:#E8A700;--dt:#0F1B3D" data-act="freeToggle" aria-pressed="${!t.hideFree}">Sans jour</button>`:'')
+   +'<button class="dl" style="--dc:#fff;--dt:#0F1B3D" data-act="daysAll">Tous</button><button class="dl" style="--dc:#fff;--dt:#0F1B3D" data-act="daysNone">Aucun</button><button class="dl" style="--dc:#fff;--dt:#0F1B3D" data-act="clearRoute" aria-label="Effacer le tracé">✕</button>'}
+map.on('moveend',()=>{const t=trip(),c=map.getCenter();t.view={c:[+c.lat.toFixed(5),+c.lng.toFixed(5)],z:map.getZoom()};clearTimeout(vt);vt=setTimeout(save,1200);clearTimeout(rt);rt=setTimeout(refreshMarkers,180)});
 
 /* ---------- centres d’intérêt ---------- */
 function renderChips(){
@@ -1780,6 +1791,10 @@ const H={
   down(el){const d=curDay(),i=d.stops.indexOf(el.dataset.id);if(i>=0&&i<d.stops.length-1){[d.stops[i+1],d.stops[i]]=[d.stops[i],d.stops[i+1]];save();renderItin()}},
   opt(){if(optimize(curDay())){renderItin();toast('Ordre optimisé (le 1er lieu reste en tête)')}else toast('Il faut au moins 3 lieux')},
   draw(){drawDay(curDay())},
+  dayToggle(el){const t=trip(),d=t.days[+el.dataset.i];if(!d)return;t.hiddenDays=t.hiddenDays||[];const k=t.hiddenDays.indexOf(d.id);k<0?t.hiddenDays.push(d.id):t.hiddenDays.splice(k,1);save();refreshMarkers()},
+  freeToggle(){const t=trip();t.hideFree=!t.hideFree;save();refreshMarkers()},
+  daysAll(){const t=trip();t.hiddenDays=[];t.hideFree=false;save();refreshMarkers()},
+  daysNone(){const t=trip();t.hiddenDays=t.days.map(d=>d.id);t.hideFree=true;save();refreshMarkers()},
   dayFocus(el){const t=trip();t.dayi=+el.dataset.i;save();drawDay(t.days[t.dayi])},
   clearRoute(){routeLayer.clearLayers()},
   legMode(el){const d=curDay();d.modes=d.modes||{};d.modes[el.dataset.id]=el.dataset.v;save();renderItin()},
