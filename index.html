@@ -1133,7 +1133,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v19';
+const APP_VERSION='26 oct. 2026 · v20';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1659,6 +1659,28 @@ function renderItin(){
 function interestsHtml(){
   return `<h4>Centres d’intérêt de la carte</h4><details id="intDet"><summary style="font-weight:800;padding:10px 0;cursor:pointer"><span id="intCnt">${S.shown.length} sur ${CATS.length}</span> affichés · toucher pour choisir</summary><div class="btns" style="margin:4px 0"><button class="btn sm" data-act="intAll">Tout cocher</button><button class="btn sm" data-act="intNone">Tout décocher</button></div>${GROUPS.map(g=>`<p class="sub" style="margin:14px 0 2px;font-weight:800">${g.t}</p>`+g.ids.map(id=>{const c=CATMAP[id];return `<label class="chk"><input type="checkbox" data-chg="shown" data-id="${id}"${S.shown.includes(id)?' checked':''}><span>${c.icon} ${c.label}</span></label>`}).join('')).join('')}</details><p class="sub">Les centres d’intérêt cochés deviennent des pastilles sur la carte, où vous activez ceux que vous voulez voir.</p>`}
 const updInt=()=>{const e=$('#intCnt');if(e)e.textContent=S.shown.length+' sur '+CATS.length;$$('#intDet input[type=checkbox]').forEach(c=>c.checked=S.shown.includes(c.dataset.id))};
+let IMPL=null,IMPMSG='';
+const tripInfo=t=>({np:(t.places||[]).length,nd:(t.days||[]).length,ns:(t.days||[]).reduce((a,d)=>a+(d.stops||[]).length,0)});
+function findSame(t){return S.trips.find(x=>x.id===t.id)||S.trips.find(x=>nrm(x.name)===nrm(t.name)&&nrm(x.country||'')===nrm(t.country||''))}
+function impHtml(){
+  let h=IMPMSG?`<div class="empty" style="margin:10px 0;text-align:left;white-space:pre-line">${esc(IMPMSG)}</div>`:'';
+  if(IMPL&&IMPL.length){h+=`<p class="sub" style="margin:10px 0 2px"><b>Choisissez les voyages à importer</b></p>`+IMPL.map((x,i)=>{const f=tripInfo(x.t),ex=findSame(x.t);
+    return `<label class="chk"><input type="checkbox" data-chg="impsel" data-i="${i}"${x.on?' checked':''}><span><b>${esc(x.t.name||'Voyage')}</b>${x.t.country?' · '+esc(x.t.country):''}<br><small>${f.np} lieux · ${f.nd} jour${f.nd>1?'s':''}${ex?' · remplacera le voyage du même nom déjà présent':''}</small></span></label>`}).join('')
+    +`<div class="btns"><button class="btn pri" data-act="impGo">Importer la sélection</button></div>`}
+  return h}
+const paintImp=()=>{const e=$('#impOut');if(e)e.innerHTML=impHtml()};
+function importText(txt){
+  IMPL=null;IMPMSG='';
+  try{
+    let j=JSON.parse(String(txt).replace(/^\uFEFF/,'').trim());
+    if(Array.isArray(j))j={trips:j};
+    if(j&&j.id&&j.places&&!j.trips)j={trips:[j]};
+    if(!j||!Array.isArray(j.trips)||!j.trips.length)throw new Error('Ce fichier ne contient aucun voyage Boussole.');
+    IMPL=j.trips.filter(t=>t&&Array.isArray(t.places)).map(t=>{if(!Array.isArray(t.days)||!t.days.length)t.days=[{id:uid(),stops:[]}];t.checks=t.checks||[];t.spend=t.spend||[];t.notes=t.notes||'';return{t,on:tripInfo(t).np>0||tripInfo(t).ns>0}});
+    if(!IMPL.length)throw new Error('Aucun voyage lisible dans ce fichier.');
+    if(!IMPL.some(x=>x.on))IMPL.forEach(x=>x.on=true)}
+  catch(e){IMPL=null;IMPMSG='Importation impossible : '+(e instanceof SyntaxError?'le contenu n’est pas un fichier JSON valide (il est peut-être incomplet).':e.message)}
+  paintImp();if(IMPL)toast(IMPL.length+' voyage(s) trouvé(s) : choisissez ceux à importer',3500);else toast('Importation impossible',3500)}
 let BULK=[],BULKMSG='';
 function gParse(line){
   const u=line.trim();if(!/^https?:\/\//i.test(u))return null;
@@ -1719,8 +1741,12 @@ async function renderVoyage(){
   ${Object.keys(sums).length?`<div class="tot"><span>Total</span><span>${Object.entries(sums).map(([c,v])=>v.toFixed(2)+' '+esc(c)).join(' + ')}</span></div>`:''}
   <h4>Hors-ligne</h4><p class="sub">${n} tuiles de carte en mémoire sur cet appareil, ${POI.size} lieux et transports enregistrés. Sur la carte, le bouton ⬇️ prépare la zone affichée.</p>
   <div class="btns"><button class="btn sm" data-act="clearcache">Vider les cartes</button><button class="btn sm" data-act="clearpoi">Vider les lieux en mémoire</button></div>
-  <h4>Connexion</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="diag">Tester la connexion</button></div><pre id="diag" style="white-space:pre-wrap;font-size:12.5px;color:var(--mut)"></pre><h4>Données</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="export">Exporter (JSON)</button><button class="btn sm" data-act="gpx">Exporter (GPX)</button><button class="btn sm" data-act="import">Importer</button></div>
-  <input type="file" id="imp" accept="application/json,.json" hidden>
+  <h4>Connexion</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="diag">Tester la connexion</button></div><pre id="diag" style="white-space:pre-wrap;font-size:12.5px;color:var(--mut)"></pre><h4>Données</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="export">Exporter (JSON)</button><button class="btn sm" data-act="gpx">Exporter (GPX)</button><button class="btn sm" data-act="import">Importer un fichier</button><button class="btn sm" data-act="expCopy">Copier mes voyages</button></div>
+  <input type="file" id="imp" hidden>
+  <div id="impOut">${impHtml()}</div>
+  <p class="sub" style="margin:12px 0 4px">Autre méthode : sur l’autre appareil, touchez « Copier mes voyages », puis collez ici (le presse-papiers est partagé entre iPad et iPhone).</p>
+  <textarea id="impTxt" placeholder="Collez ici le texte copié" style="min-height:70px"></textarea>
+  <div class="btns" style="margin-top:8px"><button class="btn sm" data-act="impText">Importer le texte collé</button></div>
   <h4>Langue de la carte</h4><div class="seg"><button class="${S.lang==='fr'?'':'on'}" data-act="lang" data-v="local">Langue locale</button><button class="${S.lang==='fr'?'on':''}" data-act="lang" data-v="fr">Français</button></div><p class="sub">En français, les noms sont traduits quand OpenStreetMap les connaît ; sinon ils apparaissent en alphabet latin, puis dans la langue locale.</p>
   <h4>Fond de carte</h4><input type="text" id="tileIn" value="${esc(S.tile||DEFAULT_TILE)}" aria-label="Adresse du serveur de tuiles"><div class="btns"><button class="btn sm" data-act="tilesave">Enregistrer</button><button class="btn sm" data-act="tilereset">Par défaut</button></div>
   <p class="sub">Par défaut, la carte OpenStreetMap est utilisée sans clé. Pour des téléchargements plus gros, indiquez votre propre serveur de tuiles.</p><p class="sub" style="margin-top:18px">Version de l’appli : ${APP_VERSION}</p>`}
@@ -1787,6 +1813,18 @@ const H={
     BULK.forEach(b=>{if(!b.cands||!b.on)return;const c=b.cands[b.sel];if(t.places.some(p=>p.id===c.id))return;const p={id:c.id,name:c.name,sub:c.sub,lat:c.lat,lon:c.lon,cat:'autre',kind:'poi',tags:{},osm:c.osm};addPlace(p);add.push(p)});
     BULK=[];paintBulk();if(!add.length)return toast('Ces lieux sont déjà dans le voyage');
     setTab('carte');refreshMarkers();map.fitBounds(L.latLngBounds(add.map(p=>[p.lat,p.lon])).pad(.3),{maxZoom:15});toast(`${add.length} lieu(x) ajouté(s) à « ${t.name} »`,3500)},
+  expCopy(){const txt=JSON.stringify({app:'boussole',v:1,trips:S.trips});
+    const fb=()=>{const e=$('#impTxt');if(e){e.value=txt;e.focus();e.select()}toast('Appui long sur le texte, puis Copier',4500)};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(()=>toast('Voyages copiés ('+Math.round(txt.length/1024)+' Ko). Collez-les sur l’autre appareil.',4500)).catch(fb);else fb()},
+  impText(){const v=($('#impTxt')||{}).value||'';if(!v.trim())return toast('Collez d’abord le texte copié');importText(v)},
+  impGo(){if(!IMPL)return;const sel=IMPL.filter(x=>x.on);if(!sel.length)return toast('Cochez au moins un voyage');
+    const lines=[];let best=null;
+    sel.forEach(({t})=>{const ex=findSame(t),f=tripInfo(t);let tr;
+      if(ex){const keep=ex.id;Object.keys(ex).forEach(k=>delete ex[k]);Object.assign(ex,t,{id:keep});tr=ex}
+      else{if(S.trips.some(x=>x.id===t.id))t.id=uid();S.trips.push(t);tr=t}
+      lines.push('✔ '+tr.name+' : '+f.np+' lieux, '+f.nd+' jour'+(f.nd>1?'s':''));if(!best||f.np>tripInfo(best).np)best=tr});
+    S.cur=best.id;save();IMPL=null;IMPMSG=lines.join('\n')+'\nVoyage actif : '+best.name;
+    routeLayer.clearLayers();const v=trip().view;if(v)map.setView(v.c,v.z);refreshMarkers();renderVoyage();toast('Voyage « '+best.name+' » importé et activé',4000)},
   intAll(){S.shown=CATS.map(c=>c.id);save();renderChips();updInt()},
   intNone(){S.shown=[];S.interests=[];save();renderChips();refreshMarkers();updInt()},
   tilesave(){const v=$('#tileIn').value.trim();if(!/\{z\}/.test(v)||!/\{x\}/.test(v)||!/\{y\}/.test(v))return toast('L’adresse doit contenir {z}, {x} et {y}');S.tile=v;save();setBase();toast('Fond de carte mis à jour')},
@@ -1800,6 +1838,7 @@ document.addEventListener('change',e=>{
   if(el.dataset.chg==='shown'){const id=el.dataset.id,i=S.shown.indexOf(id);if(el.checked&&i<0)S.shown.push(id);if(!el.checked&&i>=0){S.shown.splice(i,1);S.interests=S.interests.filter(x=>x!==id)}save();renderChips();refreshMarkers();updInt()}
   if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
   if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
+  if(el.dataset.chg==='impsel'){IMPL[+el.dataset.i].on=el.checked}
   if(el.dataset.chg==='chk'){t.checks[+el.dataset.i].d=el.checked;save();renderVoyage()}});
 document.addEventListener('input',e=>{
   const el=e.target.closest('[data-inp]');if(!el)return;const t=trip();
@@ -1809,8 +1848,8 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.id==='q'){doSearch()}
   if(e.key==='Enter'&&e.target.id==='chkIn'){H.chkadd()}
   if(e.key==='Escape'){$('#results').hidden=true;closeSheet()}});
-document.addEventListener('change',e=>{if(e.target.id!=='imp'||!e.target.files[0])return;const r=new FileReader();
-  r.onload=()=>{try{const j=JSON.parse(r.result);if(!j.trips)throw 0;j.trips.forEach(t=>{if(S.trips.some(x=>x.id===t.id))t.id=uid();S.trips.push(t)});save();toast(`${j.trips.length} voyage(s) importé(s)`);renderVoyage()}catch(err){toast('Fichier non reconnu')}};r.readAsText(e.target.files[0]);e.target.value=''});
+document.addEventListener('change',e=>{if(e.target.id!=='imp'||!e.target.files||!e.target.files[0])return;const inp=e.target,f=inp.files[0],r=new FileReader();
+  r.onload=()=>{importText(r.result);inp.value=''};r.onerror=()=>{IMPMSG='Le fichier « '+f.name+' » n’a pas pu être lu par l’appareil. Utilisez plutôt « Copier mes voyages » sur l’autre appareil, puis collez le texte ci-dessous.';paintImp();toast('Lecture du fichier impossible',4000)};r.readAsText(f)});
 $('#sgo').onclick=doSearch;
 $('#searchHere').onclick=searchHere;
 $('#fLoc').onclick=()=>locate(true);
