@@ -748,8 +748,8 @@ textarea{min-height:76px;resize:vertical}
 .mini{flex:none;width:36px;height:36px;border-radius:10px;border:0;background:var(--bg);font-size:16px;font-weight:800}
 .mini.pl{background:var(--teal);color:#fff;width:auto;padding:0 10px;font-size:12px}
 .daybar{display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;scrollbar-width:none}
-.dchip{flex:none;height:38px;padding:0 16px;border-radius:19px;border:2px solid var(--blue);background:none;color:var(--blue);font-weight:800}
-.dchip.on{background:var(--blue);color:#fff}
+.dchip{flex:none;height:38px;padding:0 16px;border-radius:19px;border:2px solid var(--dc,var(--blue));background:none;color:var(--dct,var(--blue));font-weight:800}
+.dchip.on{background:var(--dc,var(--blue));color:var(--dt,#fff)}
 .stop{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card);border-radius:14px}
 .num{flex:none;width:34px;height:34px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;font-weight:900}
 .sinfo{flex:1;min-width:0}
@@ -772,11 +772,16 @@ textarea{min-height:76px;resize:vertical}
 .chk.done span{text-decoration:line-through;opacity:.5}
 .line{display:flex;gap:8px;margin:8px 0}
 .line input{flex:1}
-.pin{width:34px;height:34px;border-radius:50%;background:var(--c);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);display:grid;place-items:center;font-size:17px;line-height:1;color:#fff;font-weight:900}
+.pin{position:relative;width:34px;height:34px;border-radius:50%;background:var(--c);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);display:grid;place-items:center;font-size:17px;line-height:1;color:#fff;font-weight:900}
 .pin.saved{width:40px;height:40px;margin:-3px;border-color:var(--sun);border-width:4px;font-size:19px}
 .me{width:18px;height:18px;border-radius:50%;background:#2457FF;border:3px solid #fff;box-shadow:0 0 0 6px rgba(36,87,255,.25)}
 #toast{position:absolute;left:50%;top:calc(var(--sat) + 110px);transform:translateX(-50%);z-index:2000;background:var(--ink);color:#fff;border-radius:16px;padding:10px 16px;font-size:14px;font-weight:700;max-width:86%;text-align:center;display:none;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 #busy{position:absolute;left:50%;top:calc(var(--sat) + 110px);transform:translateX(-50%);z-index:2001;background:var(--sun);color:#0F1B3D;border-radius:16px;padding:10px 18px;font-size:14px;font-weight:800;display:none}
+.dbadge{position:absolute;top:-10px;right:-10px;min-width:19px;height:19px;padding:0 4px;border-radius:10px;background:var(--dc);color:var(--dt);font-size:11px;font-weight:900;display:grid;place-items:center;border:2px solid #fff;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+#dayLegend{position:absolute;left:12px;bottom:128px;z-index:1000;display:flex;flex-wrap:wrap;gap:6px;max-width:62%}
+#dayLegend:empty{display:none}
+#dayLegend .dl{height:30px;min-width:30px;padding:0 11px;border-radius:15px;border:2px solid #fff;background:var(--dc);color:var(--dt);font-weight:800;font-size:12.5px;box-shadow:0 2px 8px rgba(15,27,61,.35)}
+body.sheet-open #dayLegend{display:none!important}
 .leaflet-control-attribution{font-size:10px!important}
 .leaflet-bottom.leaflet-left{bottom:0}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -792,6 +797,7 @@ textarea{min-height:76px;resize:vertical}
       <div id="results" hidden></div>
       <div id="chips" role="group" aria-label="Centres d’intérêt"></div>
     </div>
+    <div id="dayLegend" aria-label="Jours du voyage"></div>
     <div id="fabs">
       <button class="fab" id="fLoc" aria-label="Ma position">📍</button>
       <button class="fab" id="fTr" aria-label="Afficher les transports">🚌</button>
@@ -1127,7 +1133,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v18';
+const APP_VERSION='26 oct. 2026 · v19';
 const MAX_TILES=350,MAX_MARKERS=450;
 
 /* ---------- catégories ---------- */
@@ -1195,6 +1201,8 @@ const TRMAP=Object.fromEntries(TRS.map(c=>[c.id,c]));
 const OTHER={id:'autre',label:'Lieu personnel',icon:'📌',color:'#2457FF'};
 const MODES=[{id:'walk',icon:'🚶',label:'À pied',color:'#FF3D8B',v:1.25},{id:'bike',icon:'🚲',label:'Vélo',color:'#18B84F',v:4},{id:'car',icon:'🚗',label:'Voiture',color:'#FF7A1A',v:8.3},{id:'taxi',icon:'🚕',label:'Taxi',color:'#E8A700',v:8.3},{id:'transit',icon:'🚇',label:'Transports',color:'#2457FF',v:5.5}];
 const MODEMAP=Object.fromEntries(MODES.map(m=>[m.id,m]));
+const DAYCOL=['#FF3D8B','#2457FF','#18B84F','#FF7A1A','#8A4DFF','#00A8E8','#E8A700','#E8344E','#00BFA6','#C23BFF'];
+const dayCol=i=>DAYCOL[((i%DAYCOL.length)+DAYCOL.length)%DAYCOL.length];
 const catOf=id=>CATMAP[id]||(String(id).startsWith('tr:')&&TRMAP[id.slice(3)])||OTHER;
 const TRSEL=['node["railway"~"^(station|halt|tram_stop)$"]','node["highway"="bus_stop"]','nwr["amenity"~"^(ferry_terminal|bicycle_rental|taxi)$"]'];
 function trType(t){
@@ -1249,7 +1257,7 @@ const map=L.map('map',{zoomControl:false,tapHold:true,attributionControl:true}).
 map.attributionControl.setPrefix(false);
 let baseLayer=null,VEC_TPL=null;
 const poiLayer=L.layerGroup().addTo(map),savedLayer=L.layerGroup().addTo(map),routeLayer=L.layerGroup().addTo(map),meLayer=L.layerGroup().addTo(map);
-const pin=(color,html,o={})=>{const s=o.saved?40:(o.size||34);return L.divIcon({className:'',html:`<div class="pin${o.saved?' saved':''}" style="--c:${color}">${html}</div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]})};
+const pin=(color,html,o={})=>{const s=o.saved?40:(o.size||34),rg=o.ring?`;border-color:${o.ring}`:'',bd=o.badge?`<span class="dbadge" style="--dc:${o.ring};--dt:${lnTxt(o.ring)}">${o.badge}</span>`:'';return L.divIcon({className:'',html:`<div class="pin${o.saved?' saved':''}" style="--c:${color}${rg}">${html}${bd}</div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]})};
 
 /* ---------- fond de carte : classique ou en français (vectoriel) ---------- */
 const OFM_STYLE='https://tiles.openfreemap.org/styles/liberty';
@@ -1366,7 +1374,11 @@ function refreshMarkers(){
   POI.forEach(p=>{if(saved.has(p.id)||!b.contains([p.lat,p.lon]))return;if(p.kind==='tr'){if(!showTr)return}else if(!sel.has(p.cat))return;arr.push(p)});
   if(arr.length>MAX_MARKERS){arr.sort((a,b)=>hav(c.lat,c.lng,a.lat,a.lon)-hav(c.lat,c.lng,b.lat,b.lon));arr=arr.slice(0,MAX_MARKERS)}
   arr.forEach(p=>{const m=catOf(p.cat);L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{size:p.kind==='tr'?28:34}),keyboard:false}).on('click',()=>openPlace(p.id)).addTo(poiLayer)});
-  trip().places.forEach(p=>{const m=catOf(p.cat);L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{saved:true}),zIndexOffset:600,keyboard:false}).on('click',()=>openPlace(p.id)).addTo(savedLayer)})}
+  trip().places.forEach(p=>{const m=catOf(p.cat),di=dayOf(p.id);L.marker([p.lat,p.lon],{icon:pin(m.color,m.icon,{saved:true,ring:di>=0?dayCol(di):undefined,badge:di>=0?di+1:0}),zIndexOffset:600,keyboard:false}).on('click',()=>openPlace(p.id)).addTo(savedLayer)});
+  renderLegend()}
+function renderLegend(){const t=trip(),el=$('#dayLegend');if(!el)return;
+  const days=t.days.map((d,i)=>({i,n:d.stops.filter(id=>t.places.some(p=>p.id===id)).length})).filter(x=>x.n);
+  el.innerHTML=days.length?days.map(x=>`<button class="dl" style="--dc:${dayCol(x.i)};--dt:${lnTxt(dayCol(x.i))}" data-act="dayFocus" data-i="${x.i}">Jour ${x.i+1}</button>`).join('')+'<button class="dl" style="--dc:#fff;--dt:#0F1B3D" data-act="clearRoute" aria-label="Effacer le tracé">✕</button>':''}
 map.on('moveend',()=>{const t=trip(),c=map.getCenter();t.view={c:[+c.lat.toFixed(5),+c.lng.toFixed(5)],z:map.getZoom()};save();clearTimeout(rt);rt=setTimeout(refreshMarkers,180)});
 
 /* ---------- centres d’intérêt ---------- */
@@ -1599,7 +1611,8 @@ function drawDay(d){
   routeLayer.clearLayers();const ps=dayPlaces(d);if(!ps.length)return;
   legs(d).forEach(l=>{const r=d.real&&d.real[legKey(l.a,l.b,l.mode)];
     L.polyline(r&&l.mode!=='transit'?r.geo:[[l.a.lat,l.a.lon],[l.b.lat,l.b.lon]],{color:MODEMAP[l.mode].color,weight:5,opacity:.9,dashArray:r&&l.mode!=='transit'?null:'8 10'}).addTo(routeLayer)});
-  ps.forEach((p,i)=>L.marker([p.lat,p.lon],{icon:pin(catOf(p.cat).color,i+1,{saved:true}),zIndexOffset:900,interactive:true}).on('click',()=>openPlace(p.id)).addTo(routeLayer));
+  const dcol=dayCol(trip().days.indexOf(d));
+  ps.forEach((p,i)=>L.marker([p.lat,p.lon],{icon:pin(catOf(p.cat).color,i+1,{saved:true,ring:dcol}),zIndexOffset:900,interactive:true}).on('click',()=>openPlace(p.id)).addTo(routeLayer));
   setTab('carte');map.fitBounds(L.latLngBounds(ps.map(p=>[p.lat,p.lon])).pad(.25),{maxZoom:17})}
 function gmapsDay(d){
   const ps=dayPlaces(d);if(ps.length<2)return null;const f=p=>p.lat+','+p.lon,m=d.mode||'walk',tm={walk:'walking',bike:'bicycling',car:'driving',taxi:'driving',transit:'transit'}[m];
@@ -1608,13 +1621,13 @@ function gmapsDay(d){
 /* ---------- panneaux ---------- */
 function setTab(t){
   tab=t;$$('.panel').forEach(p=>p.classList.toggle('on',p.id==='p-'+t));$$('nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  const onMap=t==='carte';['#top','#fabs','#searchHere'].forEach(s=>$(s).style.display=onMap?'':'none');
+  const onMap=t==='carte';['#top','#fabs','#searchHere','#dayLegend'].forEach(s=>$(s).style.display=onMap?'':'none');
   if(onMap){setTimeout(()=>map.invalidateSize(),60);refreshMarkers()}else{closeSheet();rerender()}}
 function rerender(){({lieux:renderLieux,itin:renderItin,voyage:renderVoyage}[tab]||(()=>{}))()}
 
 function placeRow(p,opts={}){
   const c=catOf(p.cat),di=dayOf(p.id),far=pos?` · ${fd(hav(pos.lat,pos.lon,p.lat,p.lon))}`:'';
-  return `<div class="row${p.done?' done':''}"><div class="ico" style="--c:${c.color}">${c.icon}</div><div class="tx" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.label}${di>=0?' · Jour '+(di+1):''}${far}</small></div>${opts.html||''}</div>`}
+  return `<div class="row${p.done?' done':''}"><div class="ico" style="--c:${c.color}">${c.icon}</div><div class="tx" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.label}${di>=0?' · <span style="color:'+dayCol(di)+'">●</span> Jour '+(di+1):''}${far}</small></div>${opts.html||''}</div>`}
 function renderLieux(){
   const t=trip(),el=$('#p-lieux');let h=`<h2>Lieux</h2><p class="sub">${esc(t.name)}</p><div class="seg"><button class="${lieuxSeg==='trip'?'on':''}" data-act="seg" data-v="trip">Mon voyage (${t.places.length})</button><button class="${lieuxSeg==='near'?'on':''}" data-act="seg" data-v="near">Suggestions</button></div>`;
   if(lieuxSeg==='trip'){
@@ -1631,11 +1644,11 @@ function renderLieux(){
 
 function renderItin(){
   const t=trip(),el=$('#p-itin');if(!(t.dayi>=0&&t.dayi<t.days.length))t.dayi=0;const d=t.days[t.dayi],ps=dayPlaces(d),lg=legs(d);
-  let h=`<h2>Itinéraire</h2><p class="sub">${esc(t.name)}</p><div class="daybar">${t.days.map((x,i)=>`<button class="dchip${i===t.dayi?' on':''}" data-act="day" data-i="${i}">Jour ${i+1}</button>`).join('')}<button class="dchip" data-act="addday" aria-label="Ajouter un jour">＋</button></div>`;
+  let h=`<h2>Itinéraire</h2><p class="sub">${esc(t.name)}</p><div class="daybar">${t.days.map((x,i)=>`<button class="dchip${i===t.dayi?' on':''}" style="--dc:${dayCol(i)};--dct:var(--text);--dt:${lnTxt(dayCol(i))}" data-act="day" data-i="${i}">Jour ${i+1}</button>`).join('')}<button class="dchip" data-act="addday" aria-label="Ajouter un jour">＋</button></div>`;
   h+=`<p class="sub" style="margin:12px 0 0">Mode pour tout ce jour</p><div class="mch" role="group">${MODES.map(x=>`<button class="mc${(d.mode||'walk')===x.id?' on':''}" data-act="dayMode" data-v="${x.id}">${x.icon} ${x.label}</button>`).join('')}</div>`;
   if(!ps.length)h+=`<div class="empty" style="margin-top:12px">Ce jour est vide. Ajoutez des lieux depuis la liste ci-dessous.</div>`;
   ps.forEach((p,i)=>{const c=catOf(p.cat);
-    h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${c.color}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-id="${esc(p.id)}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-id="${esc(p.id)}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-id="${esc(p.id)}" aria-label="Retirer du jour">✕</button></div></div>`;
+    h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${dayCol(t.dayi)};color:${lnTxt(dayCol(t.dayi))}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-id="${esc(p.id)}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-id="${esc(p.id)}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-id="${esc(p.id)}" aria-label="Retirer du jour">✕</button></div></div>`;
     if(lg[i])h+=legHtml(lg[i])});
   if(ps.length>1){const tm=lg.reduce((a,x)=>a+x.m,0),ts=lg.reduce((a,x)=>a+x.s,0);h+=`<div class="tot"><span>Trajets du jour</span><span>${fd(tm)} · ${fm(ts)}</span></div>`}
   h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer les trajets (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
@@ -1741,6 +1754,8 @@ const H={
   down(el){const d=curDay(),i=d.stops.indexOf(el.dataset.id);if(i>=0&&i<d.stops.length-1){[d.stops[i+1],d.stops[i]]=[d.stops[i],d.stops[i+1]];save();renderItin()}},
   opt(){if(optimize(curDay())){renderItin();toast('Ordre optimisé (le 1er lieu reste en tête)')}else toast('Il faut au moins 3 lieux')},
   draw(){drawDay(curDay())},
+  dayFocus(el){const t=trip();t.dayi=+el.dataset.i;save();drawDay(t.days[t.dayi])},
+  clearRoute(){routeLayer.clearLayers()},
   legMode(el){const d=curDay();d.modes=d.modes||{};d.modes[el.dataset.id]=el.dataset.v;save();renderItin()},
   dayMode(el){const d=curDay();d.mode=el.dataset.v;d.modes={};save();renderItin()},
   retryLines(el){const p=find(el.dataset.id);if(p){LBERR.delete(p.id);loadSheetLines(p)}},
