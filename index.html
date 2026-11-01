@@ -1134,7 +1134,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v21';
+const APP_VERSION='26 oct. 2026 · v23';
 const MAX_TILES=350,MAX_MARKERS=250;
 
 /* ---------- catégories ---------- */
@@ -1220,6 +1220,7 @@ if(!S||!S.trips||!S.trips.length){const t=newTrip('Mon voyage','');S={trips:[t],
 if(!Array.isArray(S.shown))S.shown=[...DEFAULT_SHOWN];S.shown=S.shown.filter(id=>CATMAP[id]);S.interests=(S.interests||[]).filter(id=>CATMAP[id]);
 S.trips.forEach(t=>t.places.forEach(p=>{if(p.lines&&!p.lines.length)delete p.lines}));
 S.trips.forEach(t=>t.days.forEach(d=>{if(d.real&&(d.real.sig||d.real.geo))d.real={}}));
+S.trips.forEach(t=>(t.spend||[]).forEach(x=>{if(!x.id)x.id=uid()}));
 const save=()=>store.set('boussole.state',S);
 const trip=()=>S.trips.find(t=>t.id===S.cur)||S.trips[0];
 const POI=new Map(),TEMP=new Map();
@@ -1687,7 +1688,7 @@ function importText(txt){
     if(Array.isArray(j))j={trips:j};
     if(j&&j.id&&j.places&&!j.trips)j={trips:[j]};
     if(!j||!Array.isArray(j.trips)||!j.trips.length)throw new Error('Ce fichier ne contient aucun voyage Boussole.');
-    IMPL=j.trips.filter(t=>t&&Array.isArray(t.places)).map(t=>{if(!Array.isArray(t.days)||!t.days.length)t.days=[{id:uid(),stops:[]}];t.checks=t.checks||[];t.spend=t.spend||[];t.notes=t.notes||'';return{t,on:tripInfo(t).np>0||tripInfo(t).ns>0}});
+    IMPL=j.trips.filter(t=>t&&Array.isArray(t.places)).map(t=>{if(!Array.isArray(t.days)||!t.days.length)t.days=[{id:uid(),stops:[]}];t.checks=t.checks||[];t.spend=(t.spend||[]).map(x=>x.id?x:Object.assign({id:uid()},x));t.notes=t.notes||'';return{t,on:tripInfo(t).np>0||tripInfo(t).ns>0}});
     if(!IMPL.length)throw new Error('Aucun voyage lisible dans ce fichier.');
     if(!IMPL.some(x=>x.on))IMPL.forEach(x=>x.on=true)}
   catch(e){IMPL=null;IMPMSG='Importation impossible : '+(e instanceof SyntaxError?'le contenu n’est pas un fichier JSON valide (il est peut-être incomplet).':e.message)}
@@ -1734,6 +1735,25 @@ async function bulkFind(){
     catch(e){BULK.push({line,err:'Recherche impossible pour le moment.'})}
     if(i<lines.length-1)await sleep(1100)}
   BULKMSG='';paintBulk()}
+const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fmtDate=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'sans date'};
+const rateOf=(t,c)=>{c=(c||'').trim();if(/^(€|eur|euros?)$/i.test(c))return 1;const r=(t.rates||{})[c];return r>0?r:null};
+function spendHtml(t,sums){
+  const list=t.spend.map((x,i)=>({x,i})).sort((a,b)=>(b.x.date||'').localeCompare(a.x.date||'')),cur=[...new Set(t.spend.map(x=>x.cur))].filter(c=>rateOf(t,c)!==1);
+  const nodate=t.spend.filter(x=>!x.date).length;
+  return `<h4>Dépenses</h4>`+(nodate?`<p class="sub" style="color:#E8344E">${nodate} dépense${nodate>1?'s':''} sans date : touchez la date pour la renseigner avant l’export.</p>`:'')
+  +list.map(({x,i})=>`<div class="row"><div class="tx"><b>${esc(x.l)}</b><small>${x.amt.toFixed(2)} ${esc(x.cur)}${rateOf(t,x.cur)&&rateOf(t,x.cur)!==1?' ≈ '+(x.amt*rateOf(t,x.cur)).toFixed(2)+' €':''}</small></div><input type="date" value="${esc(x.date||'')}" data-chg="spdate" data-i="${i}" aria-label="Date de la dépense" style="width:auto;max-width:150px;padding:6px 8px;font-size:13px;border-radius:10px"><button class="mini" data-act="spdel" data-i="${i}" aria-label="Supprimer">✕</button></div>`).join('')
+  +`<div class="line"><input type="text" id="spL" placeholder="Ex. déjeuner"><input type="number" id="spA" inputmode="decimal" placeholder="0" style="max-width:90px"><input type="text" id="spC" value="${esc(t.cur||'€')}" style="max-width:64px" aria-label="Devise"></div>
+  <div class="line"><input type="date" id="spD" value="${esc(t.lastDate||todayISO())}" aria-label="Date de la dépense"><button class="btn sm pri" data-act="spadd">Ajouter</button></div>`
+  +(Object.keys(sums).length?`<div class="tot"><span>Total</span><span>${Object.entries(sums).map(([c,v])=>v.toFixed(2)+' '+esc(c)).join(' + ')}</span></div>`:'')
+  +(cur.length?`<p class="sub" style="margin:10px 0 4px">Taux de change vers l’euro (pour l’export) :</p>`+cur.map(c=>`<div class="line" style="align-items:center"><span style="min-width:64px;font-weight:800">1 ${esc(c)} =</span><input type="number" step="any" inputmode="decimal" data-inp="rate" data-cur="${esc(c)}" value="${(t.rates||{})[c]||''}" placeholder="ex. 0.0061" style="max-width:120px"><span>€</span></div>`).join(''):'')
+  +(t.spend.length?`<p class="sub" style="margin:12px 0 4px">Catégorie dans Mes Sous :</p><div class="line"><input type="text" data-inp="budgetCat" value="${esc(t.budgetCat||'Voyage')}" placeholder="Voyage" aria-label="Catégorie dans Mes Sous"></div><div class="btns"><button class="btn sm" data-act="spExport">Exporter les dépenses (JSON)</button><button class="btn sm" data-act="spCsv">Exporter (CSV)</button></div>`:'')}
+function spendRows(t){return t.spend.map(x=>{if(!x.id)x.id=uid();const r=rateOf(t,x.cur);return{id:x.id,date:x.date||'',libelle:x.l,montant:+x.amt.toFixed(2),devise:x.cur,montant_eur:r?+(x.amt*r).toFixed(2):null}})}
+function spendCheck(t){
+  if(!t.spend.length){toast('Aucune dépense à exporter');return false}
+  const nd=t.spend.filter(x=>!x.date).length;if(nd){toast(nd+' dépense(s) sans date : renseignez-les avant l’export',4500);return false}
+  const nr=t.spend.filter(x=>!rateOf(t,x.cur));if(nr.length){toast('Taux de change manquant pour : '+[...new Set(nr.map(x=>x.cur))].join(', '),4500);return false}
+  return true}
 async function renderVoyage(){
   const t=trip(),el=$('#p-voyage'),n=await tileCount();
   const sums={};t.spend.forEach(x=>sums[x.cur]=(sums[x.cur]||0)+x.amt);
@@ -1746,10 +1766,7 @@ async function renderVoyage(){
   <h4>À ne pas oublier</h4>${t.checks.map((c,i)=>`<label class="chk${c.d?' done':''}"><input type="checkbox" data-chg="chk" data-i="${i}"${c.d?' checked':''}><span>${esc(c.t)}</span><button class="mini" data-act="chkdel" data-i="${i}" aria-label="Supprimer">✕</button></label>`).join('')}
   <div class="line"><input type="text" id="chkIn" placeholder="Ajouter un élément" enterkeyhint="done"><button class="btn sm pri" data-act="chkadd">Ajouter</button></div>
   ${t.checks.length?'':'<button class="btn sm" data-act="chkdefault">Insérer une liste type</button>'}
-  <h4>Dépenses</h4>${t.spend.map((x,i)=>`<div class="row"><div class="tx"><b>${esc(x.l)}</b><small>${x.amt.toFixed(2)} ${esc(x.cur)}</small></div><button class="mini" data-act="spdel" data-i="${i}" aria-label="Supprimer">✕</button></div>`).join('')}
-  <div class="line"><input type="text" id="spL" placeholder="Ex. déjeuner"><input type="number" id="spA" inputmode="decimal" placeholder="0" style="max-width:90px"><input type="text" id="spC" value="${esc(t.cur||'€')}" style="max-width:64px" aria-label="Devise"></div>
-  <div class="btns" style="margin-top:0"><button class="btn sm pri" data-act="spadd">Ajouter</button></div>
-  ${Object.keys(sums).length?`<div class="tot"><span>Total</span><span>${Object.entries(sums).map(([c,v])=>v.toFixed(2)+' '+esc(c)).join(' + ')}</span></div>`:''}
+  ${spendHtml(t,sums)}
   <h4>Hors-ligne</h4><p class="sub">${n} tuiles de carte en mémoire sur cet appareil, ${POI.size} lieux et transports enregistrés. Sur la carte, le bouton ⬇️ prépare la zone affichée.</p>
   <div class="btns"><button class="btn sm" data-act="clearcache">Vider les cartes</button><button class="btn sm" data-act="clearpoi">Vider les lieux en mémoire</button></div>
   <h4>Connexion</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="diag">Tester la connexion</button></div><pre id="diag" style="white-space:pre-wrap;font-size:12.5px;color:var(--mut)"></pre><h4>Données</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="export">Exporter (JSON)</button><button class="btn sm" data-act="gpx">Exporter (GPX)</button><button class="btn sm" data-act="import">Importer un fichier</button><button class="btn sm" data-act="expCopy">Copier mes voyages</button></div>
@@ -1809,7 +1826,13 @@ const H={
   chkadd(){const i=$('#chkIn'),v=i.value.trim();if(!v)return;trip().checks.push({t:v,d:false});save();renderVoyage()},
   chkdel(el,e){e.preventDefault();trip().checks.splice(+el.dataset.i,1);save();renderVoyage()},
   chkdefault(){trip().checks=['Passeport / pièce d’identité','Assurance voyage','Moyens de paiement','Adaptateur de prise','eSIM ou carte SIM locale','Copies des documents','Billets et réservations'].map(t=>({t,d:false}));save();renderVoyage()},
-  spadd(){const l=$('#spL').value.trim(),a=parseFloat($('#spA').value.replace(',','.')),c=$('#spC').value.trim()||'€';if(!l||isNaN(a))return toast('Indiquez un libellé et un montant');const t=trip();t.cur=c;t.spend.push({l,amt:a,cur:c});save();renderVoyage()},
+  spadd(){const l=$('#spL').value.trim(),a=parseFloat($('#spA').value.replace(',','.')),c=$('#spC').value.trim()||'€',dt=$('#spD').value;if(!l||isNaN(a))return toast('Indiquez un libellé et un montant');if(!dt)return toast('Indiquez la date de la dépense');const t=trip();t.cur=c;t.lastDate=dt;t.spend.push({id:uid(),l,amt:a,cur:c,date:dt});save();renderVoyage()},
+  spExport(){const t=trip();if(!spendCheck(t))return;const rows=spendRows(t);save();
+    const cat=(t.budgetCat||'Voyage').trim()||'Voyage';
+    download((t.name||'voyage').replace(/[^\w\u00C0-\u017F-]+/g,'_')+'-depenses.json',JSON.stringify({app:'boussole-depenses',v:2,voyage:t.name,pays:t.country||'',categorie:cat,exportedAt:new Date().toISOString(),
+      depenses:rows.map(r=>({syncKey:'boussole:'+t.id+':'+r.id,date:r.date,libelle:r.libelle,montant:r.montant_eur,devise:'EUR',montant_origine:r.montant,devise_origine:r.devise}))},null,1),'application/json');
+    toast('Fichier prêt : dans Mes Sous, Réglages > Importer depuis Boussole',5000)},
+  spCsv(){const t=trip();if(!spendCheck(t))return;const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';download((t.name||'voyage')+'-depenses.csv','\uFEFFdate;libelle;montant_eur;montant_origine;devise_origine\n'+spendRows(t).map(r=>[r.date,q(r.libelle),String(r.montant_eur).replace('.',','),String(r.montant).replace('.',','),r.devise].join(';')).join('\n'),'text/csv;charset=utf-8')},
   spdel(el){trip().spend.splice(+el.dataset.i,1);save();renderVoyage()},
   async clearcache(){if(!confirm('Supprimer toutes les cartes téléchargées ?'))return;try{await caches.delete('boussole-tiles-v1');await caches.delete('boussole-vec-v1');tileCache=await caches.open('boussole-tiles-v1')}catch(e){}await setBase();renderVoyage()},
   clearpoi(){if(!confirm('Vider les lieux et transports en mémoire ? Les lieux de vos voyages sont conservés.'))return;POI.clear();idbClear();refreshMarkers();renderVoyage()},
@@ -1854,10 +1877,13 @@ document.addEventListener('change',e=>{
   if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
   if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
   if(el.dataset.chg==='impsel'){IMPL[+el.dataset.i].on=el.checked}
+  if(el.dataset.chg==='spdate'){const x=t.spend[+el.dataset.i];if(x){x.date=el.value;save();renderVoyage()}}
   if(el.dataset.chg==='chk'){t.checks[+el.dataset.i].d=el.checked;save();renderVoyage()}});
 document.addEventListener('input',e=>{
   const el=e.target.closest('[data-inp]');if(!el)return;const t=trip();
   if(el.dataset.inp==='note'){const p=t.places.find(x=>x.id===el.dataset.id);if(p){p.note=el.value;save()}}
+  if(el.dataset.inp==='budgetCat'){t.budgetCat=el.value;save()}
+  if(el.dataset.inp==='rate'){t.rates=t.rates||{};const v=parseFloat(String(el.value).replace(',','.'));if(v>0)t.rates[el.dataset.cur]=v;else delete t.rates[el.dataset.cur];save()}
   if(el.dataset.inp==='notes'){t.notes=el.value;save()}});
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.id==='q'){doSearch()}
