@@ -1137,7 +1137,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='26 oct. 2026 · v24';
+const APP_VERSION='12 nov. 2026 · v25';
 const MAX_TILES=350,MAX_MARKERS=250;
 
 /* ---------- catégories ---------- */
@@ -1426,9 +1426,15 @@ function addPlace(p){const t=trip();if(t.places.some(x=>x.id===p.id))return;t.pl
 function removePlace(id){const t=trip();t.places=t.places.filter(p=>p.id!==id);t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));save()}
 const dayOf=id=>{const t=trip(),i=t.days.findIndex(d=>d.stops.includes(id));return i}
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
-const goUrl=(p,mode='walk',from=null)=>{const f=q=>q.lat+','+q.lon;
-  if(isIOS&&mode!=='bike')return `https://maps.apple.com/?${from?'saddr='+f(from)+'&':''}daddr=${f(p)}&dirflg=${{walk:'w',car:'d',taxi:'d',transit:'r'}[mode]||'w'}`;
+const NAVS=[{id:'apple',label:'Plans'},{id:'google',label:'Google Maps'},{id:'waze',label:'Waze'}];
+const navPref=()=>NAVS.some(n=>n.id===S.nav)?S.nav:(isIOS?'apple':'google');
+const goUrl=(p,mode='walk',from=null,app=null)=>{const f=q=>q.lat+','+q.lon;let a=app||navPref();
+  const drive=mode==='car'||mode==='taxi';
+  if(a==='waze'&&drive)return `https://waze.com/ul?ll=${f(p)}&navigate=yes`;
+  if(a==='waze')a=isIOS?'apple':'google';
+  if(a==='apple')return `https://maps.apple.com/?${from?'saddr='+f(from)+'&':''}daddr=${f(p)}&dirflg=${{walk:'w',bike:'b',car:'d',taxi:'d',transit:'r'}[mode]||'w'}`;
   return `https://www.google.com/maps/dir/?api=1${from?'&origin='+f(from):''}&destination=${f(p)}&travelmode=${{walk:'walking',bike:'bicycling',car:'driving',taxi:'driving',transit:'transit'}[mode]||'walking'}`};
+const navChips=(id,drive)=>`<div class="mch" role="group" aria-label="Application de guidage">${NAVS.map(n=>`<button class="mc${navPref()===n.id?' on':''}" data-act="nav" data-v="${n.id}"${id?` data-id="${esc(id)}"`:''} aria-pressed="${navPref()===n.id}">${n.label}</button>`).join('')}</div>`;
 function nearbyTr(lat,lon,r=900){
   const seen=new Map();
   POI.forEach(p=>{if(p.kind!=='tr')return;const d=hav(lat,lon,p.lat,p.lon);if(d>r)return;const k=p.cat+'|'+p.name;const o=seen.get(k);if(!o||d<o.d)seen.set(k,{p,d})});
@@ -1522,7 +1528,7 @@ function openPlace(id){
   ${meta.length?`<p class="meta">${meta.join('<br>')}</p>`:''}
   ${p.kind==='tr'?'<div class="lns" id="myLines" style="padding-left:0;margin-top:8px"></div>':''}
   <div class="btns">${saved?`<button class="btn bad" data-act="unsave" data-id="${esc(id)}">Retirer du voyage</button>`:`<button class="btn pri" data-act="save" data-id="${esc(id)}">⭐ Ajouter au voyage</button>`}
-  </div><p class="meta" style="margin:4px 0 0">Y aller depuis ma position :</p><div class="btns" style="margin-top:6px">${['walk','bike','transit','car','taxi'].map(m=>`<a class="mgo" style="background:var(--card);color:var(--text)" href="${goUrl(p,m)}" target="_blank" rel="noopener">${MODEMAP[m].icon} ${MODEMAP[m].label}</a>`).join('')}</div>
+  </div><p class="meta" style="margin:4px 0 0">Y aller depuis ma position avec :</p>${navChips(id)}<div class="btns" style="margin-top:6px">${['walk','bike','transit','car','taxi'].map(m=>`<a class="mgo" style="background:var(--card);color:var(--text)" href="${goUrl(p,m)}" target="_blank" rel="noopener">${MODEMAP[m].icon} ${MODEMAP[m].label}</a>`).join('')}</div>
   ${saved?`<div class="line"><select data-chg="assignDay" data-id="${esc(id)}" aria-label="Jour"><option value="-1">Non planifié</option>${t0.days.map((d,i)=>`<option value="${i}"${dayOf(id)===i?' selected':''}>Jour ${i+1}</option>`).join('')}</select></div><textarea data-inp="note" data-id="${esc(id)}" placeholder="Une note : horaires, réservation, idée…">${esc(saved.note)}</textarea>`:''}
   ${p.kind==='tr'?'':`<h4 style="margin:16px 0 4px">Transports à proximité</h4><div class="trl" id="trl">${trListHtml(p)}</div><div class="btns"><button class="btn sm" data-act="refreshTr" data-id="${esc(id)}">Actualiser (en ligne)</button></div>`}`;
   $('#sheet').classList.add('on');document.body.classList.add('sheet-open');loadSheetLines(p);
@@ -1661,6 +1667,7 @@ function renderItin(){
   const t=trip(),el=$('#p-itin');if(!(t.dayi>=0&&t.dayi<t.days.length))t.dayi=0;const d=t.days[t.dayi],ps=dayPlaces(d),lg=legs(d);
   let h=`<h2>Itinéraire</h2><p class="sub">${esc(t.name)}</p><div class="daybar">${t.days.map((x,i)=>`<button class="dchip${i===t.dayi?' on':''}" style="--dc:${dayCol(i)};--dct:var(--text);--dt:${lnTxt(dayCol(i))}" data-act="day" data-i="${i}">Jour ${i+1}</button>`).join('')}<button class="dchip" data-act="addday" aria-label="Ajouter un jour">＋</button></div>`;
   h+=`<p class="sub" style="margin:12px 0 0">Mode pour tout ce jour</p><div class="mch" role="group">${MODES.map(x=>`<button class="mc${(d.mode||'walk')===x.id?' on':''}" data-act="dayMode" data-v="${x.id}">${x.icon} ${x.label}</button>`).join('')}</div>`;
+  h+=`<p class="sub" style="margin:12px 0 0">Guidage avec</p>`+navChips(null)+(navPref()==='waze'?`<p class="sub" style="margin:6px 0 0">Waze ne gère que la voiture et démarre depuis votre position. Les autres modes s’ouvrent dans ${isIOS?'Plans':'Google Maps'}.</p>`:'');
   if(!ps.length)h+=`<div class="empty" style="margin-top:12px">Ce jour est vide. Ajoutez des lieux depuis la liste ci-dessous.</div>`;
   ps.forEach((p,i)=>{const c=catOf(p.cat);
     h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${dayCol(t.dayi)};color:${lnTxt(dayCol(t.dayi))}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-id="${esc(p.id)}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-id="${esc(p.id)}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-id="${esc(p.id)}" aria-label="Retirer du jour">✕</button></div></div>`;
@@ -1741,11 +1748,12 @@ async function bulkFind(){
 const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const fmtDate=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'sans date'};
 const rateOf=(t,c)=>{c=(c||'').trim();if(/^(€|eur|euros?)$/i.test(c))return 1;const r=(t.rates||{})[c];return r>0?r:null};
+let editSp=-1;
 function spendHtml(t,sums){
   const list=t.spend.map((x,i)=>({x,i})).sort((a,b)=>(b.x.date||'').localeCompare(a.x.date||'')),cur=[...new Set(t.spend.map(x=>x.cur))].filter(c=>rateOf(t,c)!==1);
   const nodate=t.spend.filter(x=>!x.date).length;
   return `<h4>Dépenses</h4>`+(nodate?`<p class="sub" style="color:#E8344E">${nodate} dépense${nodate>1?'s':''} sans date : touchez la date pour la renseigner avant l’export.</p>`:'')
-  +list.map(({x,i})=>`<div class="row"><div class="tx"><b>${esc(x.l)}</b><small>${x.date?'📅 '+fmtDate(x.date)+' · ':'<span style="color:#E8344E">📅 sans date</span> · '}${x.amt.toFixed(2)} ${esc(x.cur)}${rateOf(t,x.cur)&&rateOf(t,x.cur)!==1?' ≈ '+(x.amt*rateOf(t,x.cur)).toFixed(2)+' €':''}${isF(x)?' · 📤 exportée':''}</small></div><input type="date" value="${esc(x.date||'')}" data-chg="spdate" data-i="${i}" aria-label="Date de la dépense" style="width:auto;max-width:150px;min-height:36px;padding:4px 8px;font-size:13px;border-radius:10px"><button class="mini" data-act="spdel" data-i="${i}" aria-label="Supprimer">✕</button></div>`).join('')
+  +list.map(({x,i})=>i===editSp?`<div class="row" style="flex-direction:column;align-items:stretch;gap:8px"><input type="text" id="spEL" value="${esc(x.l)}" aria-label="Nom de la dépense" placeholder="Nom"><div class="line" style="margin:0"><input type="text" id="spEA" inputmode="decimal" value="${String(x.amt).replace('.',',')}" aria-label="Montant" placeholder="0"><input type="text" id="spEC" value="${esc(x.cur)}" style="max-width:64px" aria-label="Devise"></div><input type="date" id="spED" value="${esc(x.date||'')}" aria-label="Date de la dépense"><div class="btns" style="margin:0"><button class="btn sm pri" data-act="spsave" data-i="${i}">Enregistrer</button><button class="btn sm" data-act="spcancel">Annuler</button></div></div>`:`<div class="row"><div class="tx"><b>${esc(x.l)}</b><small>${x.date?'📅 '+fmtDate(x.date)+' · ':'<span style="color:#E8344E">📅 sans date</span> · '}${x.amt.toFixed(2)} ${esc(x.cur)}${rateOf(t,x.cur)&&rateOf(t,x.cur)!==1?' ≈ '+(x.amt*rateOf(t,x.cur)).toFixed(2)+' €':''}${isF(x)?' · 📤 exportée':''}</small></div><input type="date" value="${esc(x.date||'')}" data-chg="spdate" data-i="${i}" aria-label="Date de la dépense" style="width:auto;max-width:150px;min-height:36px;padding:4px 8px;font-size:13px;border-radius:10px"><button class="mini" data-act="spedit" data-i="${i}" aria-label="Modifier">✏️</button><button class="mini" data-act="spdel" data-i="${i}" aria-label="Supprimer">✕</button></div>`).join('')
   +`<div class="line"><input type="text" id="spL" placeholder="Ex. déjeuner"><input type="number" id="spA" inputmode="decimal" placeholder="0" style="max-width:90px"><input type="text" id="spC" value="${esc(t.cur||'€')}" style="max-width:64px" aria-label="Devise"></div>
   <label class="dlab" for="spD">Date de la dépense</label><div class="line"><input type="date" id="spD" value="${esc(t.lastDate||todayISO())}"><button class="btn sm pri" data-act="spadd">Ajouter</button></div>`
   +(Object.keys(sums).length?`<div class="tot"><span>Total</span><span>${Object.entries(sums).map(([c,v])=>v.toFixed(2)+' '+esc(c)).join(' + ')}</span></div>`:'')
@@ -1820,6 +1828,7 @@ const H={
   dayFocus(el){const t=trip();t.dayi=+el.dataset.i;save();drawDay(t.days[t.dayi])},
   clearRoute(){routeLayer.clearLayers()},
   legMode(el){const d=curDay();d.modes=d.modes||{};d.modes[el.dataset.id]=el.dataset.v;save();renderItin()},
+  nav(el){S.nav=el.dataset.v;save();renderItin();if(el.dataset.id&&$('#sheet').classList.contains('on'))openPlace(el.dataset.id)},
   dayMode(el){const d=curDay();d.mode=el.dataset.v;d.modes={};save();renderItin()},
   retryLines(el){const p=find(el.dataset.id);if(p){LBERR.delete(p.id);loadSheetLines(p)}},
   legLines(el){const t=trip(),a=t.places.find(p=>p.id===el.dataset.from),b=t.places.find(p=>p.id===el.dataset.to);if(!a||!b)return;const k=legKey(a,b,'transit');
@@ -1838,7 +1847,13 @@ const H={
       depenses:rows.map(r=>({syncKey:'boussole:'+t.id+':'+r.id,date:r.date,libelle:r.libelle,montant:r.montant_eur,devise:'EUR',montant_origine:r.montant,devise_origine:r.devise}))},null,1),'application/json');
     toast('Fichier prêt : dans Mes Sous, Réglages > Importer depuis Boussole',5000)},
   spCsv(){const t=trip();if(!spendCheck(t))return;const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';download((t.name||'voyage')+'-depenses.csv','\uFEFFdate;libelle;montant_eur;montant_origine;devise_origine\n'+spendRows(t).map(r=>[r.date,q(r.libelle),String(r.montant_eur).replace('.',','),String(r.montant).replace('.',','),r.devise].join(';')).join('\n'),'text/csv;charset=utf-8')},
-  spdel(el){trip().spend.splice(+el.dataset.i,1);save();renderVoyage()},
+  spdel(el){editSp=-1;trip().spend.splice(+el.dataset.i,1);save();renderVoyage()},
+  spedit(el){editSp=+el.dataset.i;renderVoyage()},
+  spcancel(){editSp=-1;renderVoyage()},
+  spsave(el){const t=trip(),x=t.spend[+el.dataset.i];if(!x)return;
+    const l=$('#spEL').value.trim(),a=parseFloat($('#spEA').value.replace(',','.')),c=$('#spEC').value.trim()||x.cur,dt=$('#spED').value;
+    if(!l)return toast('Le nom ne peut pas être vide');if(isNaN(a)||a<=0)return toast('Indiquez un montant supérieur à 0');
+    x.l=l;x.amt=a;x.cur=c;x.date=dt;editSp=-1;save();renderVoyage();toast('Dépense modifiée'+(isF(x)?' : sera mise à jour dans Mes Sous à la prochaine importation':''),3500)},
   async clearcache(){if(!confirm('Supprimer toutes les cartes téléchargées ?'))return;try{await caches.delete('boussole-tiles-v1');await caches.delete('boussole-vec-v1');tileCache=await caches.open('boussole-tiles-v1')}catch(e){}await setBase();renderVoyage()},
   clearpoi(){if(!confirm('Vider les lieux et transports en mémoire ? Les lieux de vos voyages sont conservés.'))return;POI.clear();idbClear();refreshMarkers();renderVoyage()},
   export(){download('boussole-voyages.json',JSON.stringify({app:'boussole',v:1,trips:S.trips}),'application/json')},
@@ -1877,7 +1892,7 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
 document.addEventListener('change',e=>{
   const el=e.target.closest('[data-chg]');if(!el)return;const t=trip();
   if(el.dataset.chg==='assignDay'){const id=el.dataset.id,v=+el.value;t.days.forEach(d=>d.stops=d.stops.filter(x=>x!==id));if(v>=0)t.days[v].stops.push(id);save();refreshMarkers()}
-  if(el.dataset.chg==='trip'){S.cur=el.value;save();const v=trip().view;if(v)map.setView(v.c,v.z);routeLayer.clearLayers();refreshMarkers();renderVoyage()}
+  if(el.dataset.chg==='trip'){editSp=-1;S.cur=el.value;save();const v=trip().view;if(v)map.setView(v.c,v.z);routeLayer.clearLayers();refreshMarkers();renderVoyage()}
   if(el.dataset.chg==='shown'){const id=el.dataset.id,i=S.shown.indexOf(id);if(el.checked&&i<0)S.shown.push(id);if(!el.checked&&i>=0){S.shown.splice(i,1);S.interests=S.interests.filter(x=>x!==id)}save();renderChips();refreshMarkers();updInt()}
   if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
   if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
