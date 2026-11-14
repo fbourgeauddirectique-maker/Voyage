@@ -1137,7 +1137,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='12 nov. 2026 · v25';
+const APP_VERSION='14 nov. 2026 · v26';
 const MAX_TILES=350,MAX_MARKERS=250;
 
 /* ---------- catégories ---------- */
@@ -1673,7 +1673,7 @@ function renderItin(){
     h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${dayCol(t.dayi)};color:${lnTxt(dayCol(t.dayi))}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-id="${esc(p.id)}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-id="${esc(p.id)}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-id="${esc(p.id)}" aria-label="Retirer du jour">✕</button></div></div>`;
     if(lg[i])h+=legHtml(lg[i])});
   if(ps.length>1){const tm=lg.reduce((a,x)=>a+x.m,0),ts=lg.reduce((a,x)=>a+x.s,0);h+=`<div class="tot"><span>Trajets du jour</span><span>${fd(tm)} · ${fm(ts)}</span></div>`}
-  h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer les trajets (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
+  h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer les trajets (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button><button class="btn" data-act="itinExport">Exporter ce jour (IA)</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
   const free=t.places.filter(p=>dayOf(p.id)<0);
   h+=`<h4>À planifier (${free.length})</h4>`+(free.length?free.map(p=>placeRow(p,{html:`<button class="mini pl" data-act="plan" data-id="${esc(p.id)}">+ Jour ${t.dayi+1}</button>`})).join(''):'<div class="empty">Tous vos lieux sont planifiés.</div>');
   el.innerHTML=h}
@@ -1767,6 +1767,57 @@ function spendCheck(t){
   const nd=L.filter(x=>!x.date).length;if(nd){toast(nd+' dépense(s) « F - » sans date : renseignez-les avant l’export',4500);return false}
   const nr=L.filter(x=>!rateOf(t,x.cur));if(nr.length){toast('Taux de change manquant pour : '+[...new Set(nr.map(x=>x.cur))].join(', '),4500);return false}
   return true}
+
+/* ---------- export d'une journée pour analyse (Claude / ChatGPT) ---------- */
+let expSel={t:null,d:0};
+function dayExportText(t,di,opt){
+  opt=opt||{};const d=t.days[di];if(!d)return '';
+  const ps=d.stops.map(id=>t.places.find(p=>p.id===id)).filter(Boolean),L=[];
+  const md=x=>String(x==null?'':x).replace(/\s+/g,' ').trim();
+  const mo=(a)=>(d.modes&&d.modes[a])||d.mode||'walk';
+  L.push(`# ${md(t.name)}${t.country?' ('+md(t.country)+')':''} — Jour ${di+1} sur ${t.days.length}`);
+  L.push('');
+  L.push('> Contexte : voici mon programme d’une journée de voyage, exporté de mon application Boussole. Analyse-le comme un guide local expérimenté : cohérence de l’ordre des étapes, temps de trajet réalistes, risque de fermeture (horaires, jour de repos), rythme de la journée, moyens de transport les plus pratiques, oublis (repas, pauses, réservations) et améliorations concrètes. Dis-moi ce qui ne va pas et propose une version corrigée. Pose-moi des questions si une information manque (heure de départ, budget, mobilité).');
+  L.push('');
+  L.push(`Mode de déplacement par défaut : ${MODEMAP[d.mode||'walk'].label}. Nombre d’étapes : ${ps.length}.`);
+  L.push('');
+  L.push('## Étapes dans l’ordre');
+  if(!ps.length)L.push('_Aucune étape pour ce jour._');
+  ps.forEach((p,i)=>{const c=catOf(p.cat),tg=p.tags||{};
+    L.push('');L.push(`### ${i+1}. ${md(p.name)}`);
+    L.push(`- Type : ${c.label}${p.kind==='tr'?' (arrêt de transport)':''}`);
+    if(p.sub&&p.sub!==p.name)L.push(`- Adresse / secteur : ${md(p.sub)}`);
+    L.push(`- Coordonnées : ${(+p.lat).toFixed(5)}, ${(+p.lon).toFixed(5)}`);
+    if(tg.opening_hours)L.push(`- Horaires (OpenStreetMap) : ${md(tg.opening_hours)}`);
+    if(tg.cuisine)L.push(`- Cuisine : ${md(tg.cuisine)}`);
+    if(tg.fee)L.push(`- Payant : ${md(tg.fee)}`);
+    const ph=tg.phone||tg['contact:phone'],web=tg.website||tg['contact:website'];
+    if(ph)L.push(`- Téléphone : ${md(ph)}`);
+    if(web)L.push(`- Site : ${md(web)}`);
+    if(p.note&&p.note.trim())L.push(`- Ma note : ${md(p.note)}`);
+    if(p.done)L.push('- Déjà fait / visité');
+    if(p.lines&&p.lines.length)L.push(`- Lignes de transport à cet arrêt : ${p.lines.slice(0,12).map(l=>`${LT(l.t).label} ${md(l.r)}${l.n?' vers '+md(l.n):''}`).join(' ; ')}`)});
+  if(ps.length>1){
+    L.push('');L.push('## Trajets entre les étapes');let tm=0,ts=0;
+    for(let i=0;i<ps.length-1;i++){const a=ps[i],b=ps[i+1],m=mo(b.id),r=m!=='transit'&&d.real&&d.real[legKey(a,b,m)];
+      const dist=r?r.d:hav(a.lat,a.lon,b.lat,b.lon),sec=r?r.t:dist*1.3/MODEMAP[m].v+(m==='transit'?600:0);tm+=dist;ts+=sec;
+      L.push(`- ${i+1} → ${i+2} : ${md(a.name)} → ${md(b.name)} · ${MODEMAP[m].label} · ${fd(dist)} · ${fm(sec)}${m==='transit'?' (estimation grossière, sans horaires)':(r?' (itinéraire calculé)':' (estimation à vol d’oiseau)')}`)}
+    L.push('');L.push(`Total : ${fd(tm)} · ${fm(ts)} de déplacement (hors visites et pauses).`)}
+  const free=t.places.filter(p=>!t.days.some(x=>x.stops.includes(p.id))&&p.kind!=='tr');
+  if(free.length&&opt.free!==false){L.push('');L.push('## Autres lieux enregistrés dans le voyage, pas encore planifiés');
+    free.slice(0,25).forEach(p=>L.push(`- ${md(p.name)} (${catOf(p.cat).label})`))}
+  L.push('');L.push('_Les durées sont des estimations ; aucune heure de passage n’est fixée dans l’application._');
+  return L.join('\n')}
+const expFile=(t,di)=>((t.name||'voyage').replace(/[^\wÀ-ſ-]+/g,'_')+'-jour-'+(di+1)+'.md');
+function expDayOpts(t,sel){return t.days.map((x,i)=>{const n=x.stops.length;return `<option value="${i}"${i===sel?' selected':''}>Jour ${i+1} · ${n} lieu${n>1?'x':''}</option>`}).join('')}
+function expSection(t){
+  if(!S.trips.some(x=>x.id===expSel.t))expSel={t:t.id,d:t.dayi||0};
+  const et=S.trips.find(x=>x.id===expSel.t);if(expSel.d>=et.days.length)expSel.d=0;
+  return `<h4>Exporter une journée (pour Claude ou ChatGPT)</h4><p class="sub">Choisissez un voyage et un jour : le texte contient les étapes, horaires, trajets et une consigne d’analyse. Collez-le ensuite dans Claude ou ChatGPT.</p>
+  <div class="line"><select data-chg="expTrip" aria-label="Voyage à exporter">${S.trips.map(x=>`<option value="${x.id}"${x.id===et.id?' selected':''}>${esc(x.name)}${x.country?' · '+esc(x.country):''}</option>`).join('')}</select></div>
+  <div class="line"><select id="expDay" data-chg="expDay" aria-label="Jour à exporter">${expDayOpts(et,expSel.d)}</select></div>
+  <div class="btns" style="margin-top:4px"><button class="btn sm pri" data-act="expDayCopy">Copier le texte</button><button class="btn sm" data-act="expDayFile">Télécharger (.md)</button><button class="btn sm" data-act="expDayShare">Partager…</button></div>
+  <textarea id="expTxt" readonly placeholder="Le texte exporté apparaît ici" style="min-height:70px;display:none"></textarea>`}
 async function renderVoyage(){
   const t=trip(),el=$('#p-voyage'),n=await tileCount();
   const sums={};t.spend.forEach(x=>sums[x.cur]=(sums[x.cur]||0)+x.amt);
@@ -1780,6 +1831,7 @@ async function renderVoyage(){
   <div class="line"><input type="text" id="chkIn" placeholder="Ajouter un élément" enterkeyhint="done"><button class="btn sm pri" data-act="chkadd">Ajouter</button></div>
   ${t.checks.length?'':'<button class="btn sm" data-act="chkdefault">Insérer une liste type</button>'}
   ${spendHtml(t,sums)}
+  ${expSection(t)}
   <h4>Hors-ligne</h4><p class="sub">${n} tuiles de carte en mémoire sur cet appareil, ${POI.size} lieux et transports enregistrés. Sur la carte, le bouton ⬇️ prépare la zone affichée.</p>
   <div class="btns"><button class="btn sm" data-act="clearcache">Vider les cartes</button><button class="btn sm" data-act="clearpoi">Vider les lieux en mémoire</button></div>
   <h4>Connexion</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="diag">Tester la connexion</button></div><pre id="diag" style="white-space:pre-wrap;font-size:12.5px;color:var(--mut)"></pre><h4>Données</h4><div class="btns" style="margin-top:0"><button class="btn sm" data-act="export">Exporter (JSON)</button><button class="btn sm" data-act="gpx">Exporter (GPX)</button><button class="btn sm" data-act="import">Importer un fichier</button><button class="btn sm" data-act="expCopy">Copier mes voyages</button></div>
@@ -1793,6 +1845,9 @@ async function renderVoyage(){
   <p class="sub">Par défaut, la carte OpenStreetMap est utilisée sans clé. Pour des téléchargements plus gros, indiquez votre propre serveur de tuiles.</p><p class="sub" style="margin-top:18px">Version de l’appli : ${APP_VERSION}</p>`}
 
 /* ---------- actions ---------- */
+const copyTxt=(txt,okMsg)=>{
+  const fb=()=>{const e=$('#expTxt');if(e){e.style.display='block';e.value=txt;e.focus();e.select();e.scrollIntoView&&e.scrollIntoView({block:'center'})}else download('journee.md',txt,'text/markdown');toast('Appui long sur le texte, puis Copier',4500)};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(()=>toast(okMsg+' ('+Math.round(txt.length/1024*10)/10+' Ko)',4000)).catch(fb);else fb()};
 const download=(name,text,type)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)};
 const curDay=()=>{const t=trip();return t.days[t.dayi]||t.days[0]};
 const H={
@@ -1871,6 +1926,12 @@ const H={
     BULK.forEach(b=>{if(!b.cands||!b.on)return;const c=b.cands[b.sel];if(t.places.some(p=>p.id===c.id))return;const p={id:c.id,name:c.name,sub:c.sub,lat:c.lat,lon:c.lon,cat:'autre',kind:'poi',tags:{},osm:c.osm};addPlace(p);add.push(p)});
     BULK=[];paintBulk();if(!add.length)return toast('Ces lieux sont déjà dans le voyage');
     setTab('carte');refreshMarkers();map.fitBounds(L.latLngBounds(add.map(p=>[p.lat,p.lon])).pad(.3),{maxZoom:15});toast(`${add.length} lieu(x) ajouté(s) à « ${t.name} »`,3500)},
+  expDayCopy(){const et=S.trips.find(x=>x.id===expSel.t);if(!et)return;const txt=dayExportText(et,expSel.d);copyTxt(txt,'Jour '+(expSel.d+1)+' copié : collez-le dans Claude ou ChatGPT')},
+  expDayFile(){const et=S.trips.find(x=>x.id===expSel.t);if(!et)return;download(expFile(et,expSel.d),dayExportText(et,expSel.d),'text/markdown');toast('Fichier prêt : joignez-le dans Claude ou ChatGPT',4000)},
+  async expDayShare(){const et=S.trips.find(x=>x.id===expSel.t);if(!et)return;const txt=dayExportText(et,expSel.d);
+    if(navigator.share){try{await navigator.share({title:et.name+' — jour '+(expSel.d+1),text:txt});return}catch(e){if(e&&e.name==='AbortError')return}}
+    copyTxt(txt,'Partage indisponible : texte copié')},
+  itinExport(){const t=trip();copyTxt(dayExportText(t,t.dayi),'Jour '+(t.dayi+1)+' copié : collez-le dans Claude ou ChatGPT')},
   expCopy(){const txt=JSON.stringify({app:'boussole',v:1,trips:S.trips});
     const fb=()=>{const e=$('#impTxt');if(e){e.value=txt;e.focus();e.select()}toast('Appui long sur le texte, puis Copier',4500)};
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(()=>toast('Voyages copiés ('+Math.round(txt.length/1024)+' Ko). Collez-les sur l’autre appareil.',4500)).catch(fb);else fb()},
@@ -1897,6 +1958,8 @@ document.addEventListener('change',e=>{
   if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
   if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
   if(el.dataset.chg==='impsel'){IMPL[+el.dataset.i].on=el.checked}
+  if(el.dataset.chg==='expTrip'){const et=S.trips.find(x=>x.id===el.value);expSel={t:el.value,d:0};const sel=$('#expDay');if(sel&&et)sel.innerHTML=expDayOpts(et,0)}
+  if(el.dataset.chg==='expDay'){expSel.d=+el.value}
   if(el.dataset.chg==='spdate'){const x=t.spend[+el.dataset.i];if(x){x.date=el.value;save();renderVoyage()}}
   if(el.dataset.chg==='chk'){t.checks[+el.dataset.i].d=el.checked;save();renderVoyage()}});
 document.addEventListener('input',e=>{
