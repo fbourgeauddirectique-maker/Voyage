@@ -758,6 +758,10 @@ input[type=date]::-webkit-date-and-time-value{text-align:left;min-height:1.4em;c
 .sinfo{flex:1;min-width:0}
 .sinfo b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sinfo small{color:var(--mut);font-size:12.5px}
+.sinfo .wx{display:block;margin-top:3px;font-size:12.5px;color:var(--text);font-weight:700}
+.sinfo .wx.mut{color:var(--mut);font-weight:600}
+.dateline{display:flex;align-items:center;gap:8px;margin-top:12px}
+.dateline input{width:auto;min-height:38px;padding:4px 10px;font-size:14px;border-radius:10px}
 .sact{display:flex;gap:4px}
 .leg{margin:0 0 0 28px;padding:7px 0 7px 22px;border-left:3px dotted var(--blue);color:var(--mut);font-size:13px;font-weight:700}
 .mch{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
@@ -1137,7 +1141,7 @@ const hav=(a,b,c,d)=>{const x=Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(
 const fd=m=>m<950?(Math.round(m/10)*10)+' m':(m/1000).toFixed(m<10000?1:0)+' km';
 const fm=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')};
 const DEFAULT_TILE='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const APP_VERSION='14 nov. 2026 · v27';
+const APP_VERSION='15 nov. 2026 · v28';
 const MAX_TILES=350,MAX_MARKERS=250;
 
 /* ---------- catégories ---------- */
@@ -1665,14 +1669,59 @@ function renderLieux(){
     h+=list.length?list.map(p=>placeRow(p,{html:`<button class="mini" data-act="add" data-id="${esc(p.id)}" aria-label="Ajouter">⭐</button>`})).join(''):'<div class="empty">Aucune suggestion en mémoire. Sur la carte, choisissez vos centres d’intérêt puis touchez « Chercher dans cette zone ».</div>'}
   el.innerHTML=h}
 
+
+/* ---------- météo par étape (Open-Meteo, sans clé) ---------- */
+const WX=store.get('boussole.wx',{}),WXF={},WXBUSY={};
+const wxKey=(p,date)=>(+p.lat).toFixed(2)+','+(+p.lon).toFixed(2)+'|'+date;
+const addDays=(iso,n)=>{const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
+const dayDiff=iso=>Math.round((new Date(iso+'T12:00:00Z')-new Date(todayISO()+'T12:00:00Z'))/864e5);
+const wxRange=date=>{const n=dayDiff(date);return n>15?'Prévisions disponibles 16 jours avant la date':n<-90?'Météo passée non disponible':null};
+function wxAgg(h){
+  const T=[],P=[],R=[],C=[];
+  (h.time||[]).forEach((t,i)=>{const hr=+String(t).slice(11,13);if(hr<7||hr>19)return;
+    if(h.temperature_2m&&h.temperature_2m[i]!=null)T.push(h.temperature_2m[i]);
+    if(h.precipitation&&h.precipitation[i]!=null)R.push(h.precipitation[i]);
+    if(h.precipitation_probability&&h.precipitation_probability[i]!=null)P.push(h.precipitation_probability[i]);
+    if(h.cloud_cover&&h.cloud_cover[i]!=null)C.push(h.cloud_cover[i])});
+  if(!T.length)return null;
+  return{tmin:Math.min(...T),tmax:Math.max(...T),mm:R.reduce((a,b)=>a+b,0),pp:P.length?Math.max(...P):null,cc:C.length?C.reduce((a,b)=>a+b,0)/C.length:null,ts:Date.now()}}
+const wxIcon=w=>{const pp=w.pp==null?(w.mm>=1?100:w.mm>=.2?40:0):w.pp;if(w.mm>=1&&pp>=50)return'🌧️';if(w.mm>=.2||pp>=40)return'🌦️';const c=w.cc==null?0:w.cc;return c>=70?'☁️':c>=35?'⛅':'☀️'};
+const wxTxt=w=>`${wxIcon(w)} ${Math.round(w.tmin)}° / ${Math.round(w.tmax)}° · 💧 ${w.pp==null?'':Math.round(w.pp)+' % · '}${w.mm<.1?'0':w.mm.toFixed(1)} mm`;
+const wxFresh=(e,date)=>e&&(dayDiff(date)<0||Date.now()-e.ts<3*36e5);
+async function wxEnsure(d){
+  if(!d||!d.date||wxRange(d.date))return false;
+  const t=trip(),seen=new Set(),need=[];
+  d.stops.forEach(id=>{const p=t.places.find(x=>x.id===id);if(!p)return;const k=wxKey(p,d.date);if(seen.has(k))return;seen.add(k);
+    if(!wxFresh(WX[k],d.date)&&!(WXF[k]&&Date.now()-WXF[k]<60000))need.push({p,k})});
+  if(!need.length||!navigator.onLine||WXBUSY[d.date])return false;
+  WXBUSY[d.date]=1;let changed=false;
+  for(let i=0;i<need.length;i+=20){const part=need.slice(i,i+20);
+    const url='https://api.open-meteo.com/v1/forecast?latitude='+part.map(x=>(+x.p.lat).toFixed(2)).join(',')+'&longitude='+part.map(x=>(+x.p.lon).toFixed(2)).join(',')+'&hourly=temperature_2m,precipitation,precipitation_probability,cloud_cover&timezone=auto&start_date='+d.date+'&end_date='+d.date;
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),12000);
+    try{const r=await fetch(url,{signal:ac.signal});const j=await r.json();clearTimeout(to);
+      const arr=Array.isArray(j)?j:[j];
+      part.forEach((x,n)=>{const a=arr[n]&&arr[n].hourly?wxAgg(arr[n].hourly):null;if(a){WX[x.k]=a;changed=true}else WXF[x.k]=Date.now()})}
+    catch(e){clearTimeout(to);part.forEach(x=>WXF[x.k]=Date.now())}}
+  delete WXBUSY[d.date];
+  const ks=Object.keys(WX);if(ks.length>400)ks.sort((a,b)=>WX[a].ts-WX[b].ts).slice(0,ks.length-300).forEach(k=>delete WX[k]);
+  if(changed)store.set('boussole.wx',WX);
+  return true}
+function wxLine(p,d){
+  if(!d.date)return '';
+  const rg=wxRange(d.date);if(rg)return `<span class="wx mut">☁️ ${rg}</span>`;
+  const k=wxKey(p,d.date),e=WX[k];
+  if(e)return `<span class="wx">${wxTxt(e)}${!navigator.onLine||!wxFresh(e,d.date)?' <small>(ancien)</small>':''}</span>`;
+  if(WXF[k]&&Date.now()-WXF[k]<60000)return `<span class="wx mut">☁️ Météo indisponible${navigator.onLine?'':' (hors ligne)'}</span>`;
+  return `<span class="wx mut">☁️ Météo…</span>`}
 function renderItin(){
   const t=trip(),el=$('#p-itin');if(!(t.dayi>=0&&t.dayi<t.days.length))t.dayi=0;const d=t.days[t.dayi];d.stops=d.stops.filter(id=>t.places.some(p=>p.id===id));const ps=dayPlaces(d),lg=legs(d);
   let h=`<h2>Itinéraire</h2><p class="sub">${esc(t.name)}</p><div class="daybar">${t.days.map((x,i)=>`<button class="dchip${i===t.dayi?' on':''}" style="--dc:${dayCol(i)};--dct:var(--text);--dt:${lnTxt(dayCol(i))}" data-act="day" data-i="${i}">Jour ${i+1}</button>`).join('')}<button class="dchip" data-act="addday" aria-label="Ajouter un jour">＋</button></div>`;
+  h+=`<div class="dateline"><label for="dayDate" style="font-weight:800">📅 Date de ce jour</label><input type="date" id="dayDate" value="${esc(d.date||'')}" data-chg="daydate"></div>`+(d.date?`<p class="sub" style="margin:4px 0 0">Météo de 7 h à 19 h à l’endroit de chaque étape (Open-Meteo, 16 jours à l’avance).</p>`:`<p class="sub" style="margin:4px 0 0">Indiquez la date pour afficher la météo de chaque étape.</p>`);
   h+=`<p class="sub" style="margin:12px 0 0">Mode pour tout ce jour</p><div class="mch" role="group">${MODES.map(x=>`<button class="mc${(d.mode||'walk')===x.id?' on':''}" data-act="dayMode" data-v="${x.id}">${x.icon} ${x.label}</button>`).join('')}</div>`;
   h+=`<p class="sub" style="margin:12px 0 0">Guidage avec</p>`+navChips(null)+(navPref()==='waze'?`<p class="sub" style="margin:6px 0 0">Waze ne gère que la voiture et démarre depuis votre position. Les autres modes s’ouvrent dans ${isIOS?'Plans':'Google Maps'}.</p>`:'');
   if(!ps.length)h+=`<div class="empty" style="margin-top:12px">Ce jour est vide. Ajoutez des lieux depuis la liste ci-dessous.</div>`;
   ps.forEach((p,i)=>{const c=catOf(p.cat);
-    h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${dayCol(t.dayi)};color:${lnTxt(dayCol(t.dayi))}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small></div><div class="sact"><button class="mini" data-act="up" data-i="${i}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-i="${i}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-i="${i}" aria-label="Retirer du jour">✕</button></div></div>`;
+    h+=`<div class="stop" style="margin-top:${i?0:12}px"><div class="num" style="--c:${dayCol(t.dayi)};color:${lnTxt(dayCol(t.dayi))}">${i+1}</div><div class="sinfo" data-act="focus" data-id="${esc(p.id)}"><b>${esc(p.name)}</b><small>${c.icon} ${c.label}</small>${wxLine(p,d)}</div><div class="sact"><button class="mini" data-act="up" data-i="${i}" aria-label="Monter">↑</button><button class="mini" data-act="down" data-i="${i}" aria-label="Descendre">↓</button><button class="mini" data-act="unplan" data-i="${i}" aria-label="Retirer du jour">✕</button></div></div>`;
     if(lg[i])h+=legHtml(lg[i])});
   if(ps.length>1){const tm=lg.reduce((a,x)=>a+x.m,0),ts=lg.reduce((a,x)=>a+x.s,0);h+=`<div class="tot"><span>Trajets du jour</span><span>${fd(tm)} · ${fm(ts)}</span></div>`}
   h+=`<div class="btns"><button class="btn pri" data-act="draw">Voir sur la carte</button><button class="btn" data-act="real">Calculer les trajets (en ligne)</button><button class="btn sun" data-act="opt">Optimiser l’ordre</button><button class="btn" data-act="itinExport">Exporter ce jour (IA)</button>${gmapsDay(d)?`<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="${gmapsDay(d)}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>`:''}${t.days.length>1?'<button class="btn bad sm" data-act="delday">Supprimer ce jour</button>':''}</div>`;
@@ -1680,7 +1729,8 @@ function renderItin(){
   const addBtn=p=>{const n=d.stops.filter(x=>x===p.id).length;return `<button class="mini pl" data-act="plan" data-id="${esc(p.id)}">${n?'+ encore':'+ Jour '+(t.dayi+1)}</button>`};
   h+=`<h4>À planifier (${free.length})</h4>`+(free.length?free.map(p=>placeRow(p,{html:addBtn(p)})).join(''):'<div class="empty">Tous vos lieux sont planifiés.</div>');
   if(used.length)h+=`<h4>Déjà planifiés (${used.length})</h4><p class="sub" style="margin:0 0 4px">Touchez « + » pour les ajouter aussi au jour ${t.dayi+1}, même s’ils y sont déjà (retour à l’hôtel, plusieurs nuits…).</p>`+used.map(p=>placeRow(p,{html:addBtn(p)})).join('');
-  el.innerHTML=h}
+  el.innerHTML=h;
+  if(d.date)wxEnsure(d).then(ch=>{if(ch&&tab==='itin'&&curDay()===d)renderItin()})}
 
 function interestsHtml(){
   return `<h4>Centres d’intérêt de la carte</h4><details id="intDet"><summary style="font-weight:800;padding:10px 0;cursor:pointer"><span id="intCnt">${S.shown.length} sur ${CATS.length}</span> affichés · toucher pour choisir</summary><div class="btns" style="margin:4px 0"><button class="btn sm" data-act="intAll">Tout cocher</button><button class="btn sm" data-act="intNone">Tout décocher</button></div>${GROUPS.map(g=>`<p class="sub" style="margin:14px 0 2px;font-weight:800">${g.t}</p>`+g.ids.map(id=>{const c=CATMAP[id];return `<label class="chk"><input type="checkbox" data-chg="shown" data-id="${id}"${S.shown.includes(id)?' checked':''}><span>${c.icon} ${c.label}</span></label>`}).join('')).join('')}</details><p class="sub">Les centres d’intérêt cochés deviennent des pastilles sur la carte, où vous activez ceux que vous voulez voir.</p>`}
@@ -1783,6 +1833,7 @@ function dayExportText(t,di,opt){
   L.push('');
   L.push('> Contexte : voici mon programme d’une journée de voyage, exporté de mon application Boussole. Analyse-le comme un guide local expérimenté : cohérence de l’ordre des étapes, temps de trajet réalistes, risque de fermeture (horaires, jour de repos), rythme de la journée, moyens de transport les plus pratiques, oublis (repas, pauses, réservations) et améliorations concrètes. Dis-moi ce qui ne va pas et propose une version corrigée. Pose-moi des questions si une information manque (heure de départ, budget, mobilité).');
   L.push('');
+  if(d.date)L.push(`Date : ${fmtDate(d.date)}`);
   L.push(`Mode de déplacement par défaut : ${MODEMAP[d.mode||'walk'].label}. Nombre d’étapes : ${ps.length}.`);
   L.push('');
   L.push('## Étapes dans l’ordre');
@@ -1800,6 +1851,7 @@ function dayExportText(t,di,opt){
     if(web)L.push(`- Site : ${md(web)}`);
     if(p.note&&p.note.trim())L.push(`- Ma note : ${md(p.note)}`);
     if(p.done)L.push('- Déjà fait / visité');
+    {const e=d.date&&WX[wxKey(p,d.date)];if(e)L.push(`- Météo 7 h–19 h : ${Math.round(e.tmin)}° à ${Math.round(e.tmax)}°C, précipitations ${e.mm<.1?'nulles':e.mm.toFixed(1)+' mm'}${e.pp==null?'':', probabilité max '+Math.round(e.pp)+' %'}`)}
     if(p.lines&&p.lines.length)L.push(`- Lignes de transport à cet arrêt : ${p.lines.slice(0,12).map(l=>`${LT(l.t).label} ${md(l.r)}${l.n?' vers '+md(l.n):''}`).join(' ; ')}`)});
   if(ps.length>1){
     L.push('');L.push('## Trajets entre les étapes');let tm=0,ts=0;
@@ -1872,7 +1924,7 @@ const H={
   del(el){if(confirm('Retirer ce lieu du voyage ?')){removePlace(el.dataset.id);renderLieux()}},
   focus(el){focusPlace(el.dataset.id)},
   day(el){trip().dayi=+el.dataset.i;save();renderItin()},
-  addday(){const t=trip();t.days.push({id:uid(),stops:[]});t.dayi=t.days.length-1;save();renderItin()},
+  addday(){const t=trip(),pv=t.days[t.days.length-1];t.days.push({id:uid(),stops:[],date:pv&&pv.date?addDays(pv.date,1):''});t.dayi=t.days.length-1;save();renderItin()},
   delday(){if(!confirm('Supprimer ce jour ? Les lieux resteront dans le voyage.'))return;const t=trip();t.days.splice(t.dayi,1);t.dayi=Math.max(0,t.dayi-1);save();renderItin()},
   plan(el){const d=curDay();d.stops.push(el.dataset.id);save();renderItin();refreshMarkers()},
   unplan(el){const d=curDay(),i=+el.dataset.i;if(i>=0&&i<d.stops.length)d.stops.splice(i,1);save();renderItin();refreshMarkers()},
@@ -1965,6 +2017,9 @@ document.addEventListener('change',e=>{
   if(el.dataset.chg==='bulkon'){BULK[+el.dataset.i].on=el.checked;paintBulk()}
   if(el.dataset.chg==='bulksel'){BULK[+el.dataset.i].sel=+el.value;paintBulk()}
   if(el.dataset.chg==='impsel'){IMPL[+el.dataset.i].on=el.checked}
+  if(el.dataset.chg==='daydate'){const di=t.dayi,v=el.value;t.days[di].date=v;
+    if(v)for(let j=di+1;j<t.days.length;j++)if(!t.days[j].date)t.days[j].date=addDays(v,j-di);
+    save();renderItin()}
   if(el.dataset.chg==='expTrip'){const et=S.trips.find(x=>x.id===el.value);expSel={t:el.value,d:0};const sel=$('#expDay');if(sel&&et)sel.innerHTML=expDayOpts(et,0)}
   if(el.dataset.chg==='expDay'){expSel.d=+el.value}
   if(el.dataset.chg==='spdate'){const x=t.spend[+el.dataset.i];if(x){x.date=el.value;save();renderVoyage()}}
